@@ -1,0 +1,5 @@
+laspy
+numpy
+pyvista
+PySide6
+pyvistaqt

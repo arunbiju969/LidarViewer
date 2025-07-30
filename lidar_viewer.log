@@ -1,0 +1,7 @@
+2025-07-29 10:45:47,585 [INFO] [STARTUP] lidar_viewer.py started.
+2025-07-29 10:45:47,986 [DEBUG] matplotlib data path: C:\Users\W0491597\AppData\Local\miniforge3\envs\lidarviewer312\Lib\site-packages\matplotlib\mpl-data
+2025-07-29 10:45:47,994 [DEBUG] CONFIGDIR=C:\Users\W0491597\.matplotlib
+2025-07-29 10:45:48,010 [DEBUG] interactive is False
+2025-07-29 10:45:48,010 [DEBUG] platform is win32
+2025-07-29 10:45:48,094 [DEBUG] CACHEDIR=C:\Users\W0491597\.matplotlib
+2025-07-29 10:45:48,094 [DEBUG] Using fontManager instance from C:\Users\W0491597\.matplotlib\fontlist-v390.json
