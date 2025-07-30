@@ -3,7 +3,7 @@ from PySide6.QtGui import QPalette, QColor
 import pyvista as pv
 from PySide6.QtWidgets import QApplication
 
-def apply_theme(theme_name):
+def apply_theme(theme_name, main_window=None):
     app = QApplication.instance()
     if theme_name == "Dark":
         # Set Qt modern dark grey palette
@@ -29,8 +29,68 @@ def apply_theme(theme_name):
             app.setStyleSheet(dark_qss)
         except Exception:
             app.setStyleSheet("")
+        # Set menu bar and menu style for dark theme
+        menu_style = """
+            QMenuBar {
+                background: #232629;
+                color: #f8f8f8;
+                border: none;
+            }
+            QMenuBar::item {
+                background: transparent;
+                color: #f8f8f8;
+                padding: 6px 18px;
+                margin: 0 2px;
+                border-radius: 4px;
+            }
+            QMenuBar::item:selected {
+                background: #3daee9;
+                color: #232629;
+            }
+            QMenu {
+                background: #232629;
+                color: #f8f8f8;
+                border: 1px solid #444;
+            }
+            QMenu::item:selected {
+                background: #3daee9;
+                color: #232629;
+            }
+        """
+        if main_window:
+            main_window.setStyleSheet(menu_style)
         pv.set_plot_theme("dark")
     else:
         app.setPalette(app.style().standardPalette())
         app.setStyleSheet("")
+        # Set menu bar and menu style for light theme
+        menu_style = """
+            QMenuBar {
+                background: #f8f8f8;
+                color: #232629;
+                border: none;
+            }
+            QMenuBar::item {
+                background: transparent;
+                color: #232629;
+                padding: 6px 18px;
+                margin: 0 2px;
+                border-radius: 4px;
+            }
+            QMenuBar::item:selected {
+                background: #3daee9;
+                color: #fff;
+            }
+            QMenu {
+                background: #fff;
+                color: #232629;
+                border: 1px solid #bbb;
+            }
+            QMenu::item:selected {
+                background: #3daee9;
+                color: #fff;
+            }
+        """
+        if main_window:
+            main_window.setStyleSheet(menu_style)
         pv.set_plot_theme("document")

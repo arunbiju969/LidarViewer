@@ -67,7 +67,8 @@ class PointCloudViewer(QWidget):
         self._colormap = "viridis"
         self._point_size = 3
 
-    def display_point_cloud(self, points, scalars=None, cmap=None):
+    def display_point_cloud(self, points, scalars=None, cmap=None, return_actor=False):
+        print(f"[DEBUG] display_point_cloud called: points.shape={getattr(points, 'shape', None)}, return_actor={return_actor}")
         self.plotter.clear()
         scalar_bar_args = {}
         # Set scalar bar text color based on theme
@@ -76,9 +77,10 @@ class PointCloudViewer(QWidget):
         else:
             scalar_bar_args['color'] = 'black'
         point_size = getattr(self, '_point_size', 3)
+        actor = None
         if scalars is not None:
             used_cmap = cmap if cmap is not None else self._colormap
-            self.plotter.add_points(
+            actor = self.plotter.add_points(
                 points,
                 scalars=scalars,
                 cmap=used_cmap,
@@ -87,6 +89,8 @@ class PointCloudViewer(QWidget):
                 scalar_bar_args=scalar_bar_args
             )
         else:
-            self.plotter.add_points(points, color="#3daee9", render_points_as_spheres=True, point_size=point_size)
+            actor = self.plotter.add_points(points, color="#3daee9", render_points_as_spheres=True, point_size=point_size)
         self.plotter.reset_camera()
         self.plotter.update()
+        if return_actor:
+            return actor

@@ -15,6 +15,7 @@ from pyvistaqt import QtInteractor
 from sidebar.sidebar_widget import SidebarWidget
 from viewer.pointcloud_viewer import PointCloudViewer
 from fileio.las_loader import load_las_file, save_last_file, load_last_file
+from layers.layer_db import save_layer_settings, load_layer_settings, generate_layer_id
 
 print("[INFO] Starting lidar_viewer.py")
 class MainWindow(QMainWindow):
@@ -96,16 +97,24 @@ class MainWindow(QMainWindow):
         else:
             self.viewer._colormap = colormap
             self.viewer.display_point_cloud(self._points, scalars=norm_scalars)
+        # Save current sidebar settings to DB for this layer
+        if hasattr(self, '_current_layer_id') and self._current_layer_id and hasattr(self, '_current_file_path') and self._current_file_path:
+            save_layer_settings(self._current_layer_id, self._current_file_path, self._get_sidebar_settings())
     SETTINGS_FILE = "settings.json"
 
 
     def __init__(self, las_data=None, default_file=None):
+        print(f"[DEBUG] MainWindow.__init__ id(self)={id(self)}")
         print("[INFO] Initializing MainWindow UI...")
         super().__init__()
         self.setWindowTitle("LiDAR Point Cloud Viewer")
 
+        self._layers = {}  # uuid -> dict with file_path, points, actor, visible
         self.sidebar = SidebarWidget()
         self.sidebar.setObjectName("sidebar")
+        # Connect layer manager's layer_toggled signal to this window's handler
+        self.sidebar.layer_manager.layer_toggled.connect(self._on_layer_toggled)
+        # Menu bar style is now set in _update_theme() for theme support
         print(f"[DEBUG] SidebarWidget created: {self.sidebar}")
         # Set callback for custom color pickers
         self.sidebar.color_controls.on_custom_color_set = self._on_custom_color_changed
@@ -120,6 +129,7 @@ class MainWindow(QMainWindow):
         print("[INFO] Sidebar and Viewer widgets created.")
 
         self._current_file_path = None  # Track currently loaded file
+        self._current_layer_id = None   # Track currently loaded layer UUID
         self._metadata_action = None    # Reference to metadata menu action
 
         main_layout = QHBoxLayout()
@@ -160,20 +170,19 @@ class MainWindow(QMainWindow):
             self.sidebar.set_status(f"Loaded: {os.path.basename(default_file)} ({self._points.shape[0]} points)")
             self.sidebar.update_file_info(os.path.basename(default_file), self._points.shape[0])
             self.sidebar.update_dimensions(data["dims"])
-            # Connect color by and colormap dropdowns to coloring logic
             self.sidebar.color_controls.dimension_box.currentIndexChanged.connect(self._on_color_by_changed)
             self.sidebar.color_controls.colormap_box.currentIndexChanged.connect(self._on_color_by_changed)
             self._current_file_path = default_file
+            self._current_layer_id = generate_layer_id()
             if self._metadata_action:
                 self._metadata_action.setEnabled(True)
-            # Ensure projection is set after loading file
             self._on_projection_changed()
-            # Apply coloring immediately
             self._on_color_by_changed()
         else:
             print("[INFO] No default file loaded.")
             self.sidebar.set_status("No default file loaded.")
             self._current_file_path = None
+            self._current_layer_id = None
             if self._metadata_action:
                 self._metadata_action.setEnabled(False)
 
@@ -181,11 +190,11 @@ class MainWindow(QMainWindow):
 
     def _update_theme(self):
         print(f"[INFO] Theme changed to: {self.sidebar.theme_box.currentText()}")
-        # Use the sidebar's theme_box for theme selection
         theme = self.sidebar.theme_box.currentText()
         from theme.theme_manager import apply_theme
         self.viewer.set_theme(theme)
-        apply_theme(theme)
+        # Delegate all theme and menu bar/menu style logic to theme_manager
+        apply_theme(theme, main_window=self)
         # Redraw plotter if available
         if hasattr(self.viewer, 'plotter'):
             self.viewer.plotter.update()
@@ -270,9 +279,22 @@ class MainWindow(QMainWindow):
             self._las = data["las"]
             self._cloud = data["cloud"]
             self._points = data["points"]
-            self.viewer.display_point_cloud(self._points)
+            self._current_layer_id = generate_layer_id()
+            self._current_file_path = file_path
+            # Add to layers dict
+            self._layers[self._current_layer_id] = {
+                'file_path': file_path,
+                'points': self._points,
+                'visible': True,
+                'actor': None  # Will be set below
+            }
+            settings = load_layer_settings(self._current_layer_id)
+            if settings:
+                print(f"[INFO] Loaded sidebar settings from DB for layer {self._current_layer_id}")
+                self._set_sidebar_settings(settings)
+            # Display all visible layers
+            self._update_all_layers_in_viewer()
             print(f"[INFO] Point cloud displayed for file: {file_path}")
-            # Ensure projection is set after loading file
             self._on_projection_changed()
             self.viewer.plotter.add_axes()
             self.viewer.plotter.reset_camera()
@@ -280,20 +302,97 @@ class MainWindow(QMainWindow):
             status_msg = f"Loaded: {os.path.basename(file_path)} ({self._points.shape[0]} points)"
             self.sidebar.update_file_info(os.path.basename(file_path), self._points.shape[0])
             self.sidebar.update_dimensions(data["dims"])
-            # Connect color by and colormap dropdowns to coloring logic
             self.sidebar.color_controls.dimension_box.currentIndexChanged.connect(self._on_color_by_changed)
             self.sidebar.color_controls.colormap_box.currentIndexChanged.connect(self._on_color_by_changed)
-            self._current_file_path = file_path
             if self._metadata_action:
                 self._metadata_action.setEnabled(True)
-            # Apply coloring immediately
             self._on_color_by_changed()
+            save_layer_settings(self._current_layer_id, self._current_file_path, self._get_sidebar_settings())
+            # Update the layer manager with all layers, checked state reflects visibility
+            all_layers = [(uuid, l['file_path']) for uuid, l in self._layers.items()]
+            checked_uuids = set(uuid for uuid, l in self._layers.items() if l['visible'])
+            self.sidebar.update_layers(all_layers, current_uuid=self._current_layer_id, checked_uuids=checked_uuids)
         except Exception as e:
             print(f"[ERROR] Failed to load file: {file_path}: {e}")
             status_msg = f"Failed to load: {os.path.basename(file_path)}"
         finally:
             self.sidebar.set_status(status_msg)
             QApplication.processEvents()
+
+    def _update_all_layers_in_viewer(self):
+        print(f"[DEBUG] _update_all_layers_in_viewer: id(self)={id(self)}")
+        # Remove all actors
+        if hasattr(self.viewer, 'plotter'):
+            print("[DEBUG] _update_all_layers_in_viewer: clearing plotter")
+            self.viewer.plotter.clear()
+        # Add all visible layers
+        for uuid, layer in self._layers.items():
+            if layer['visible']:
+                # Add to plotter and store actor
+                print("[DEBUG] _update_all_layers_in_viewer: adding visible layers")
+                print(f"[DEBUG] Layer {uuid}: visible={layer['visible']}")
+                print(f"[DEBUG] Calling display_point_cloud for layer {uuid}")
+                actor = self.viewer.display_point_cloud(layer['points'], return_actor=True)
+                self._layers[uuid]['actor'] = actor
+            else:
+                self._layers[uuid]['actor'] = None
+
+    def _on_layer_toggled(self, uuid, checked):
+        print(f"[DEBUG] _on_layer_toggled: id(self)={id(self)}, uuid={uuid}, checked={checked}")
+        print(f"[DEBUG] _on_layer_toggled: self._layers.keys()={list(self._layers.keys())}")
+        if uuid in self._layers:
+            self._layers[uuid]['visible'] = checked
+            try:
+                if checked:
+                    # Restore sidebar settings for this layer and update viewer
+                    settings = load_layer_settings(uuid)
+                    if settings:
+                        print(f"[DEBUG] Restoring sidebar settings for layer {uuid}")
+                        self._set_sidebar_settings(settings)
+                    self._current_layer_id = uuid
+                    self._current_file_path = self._layers[uuid]['file_path']
+                    # Redraw plotter for this layer with restored settings
+                    self._on_color_by_changed()
+                else:
+                    # Just update the plotter to remove the layer
+                    print("[DEBUG] Toggling layer OFF, updating all layers in viewer")
+                    self._update_all_layers_in_viewer()
+            except Exception as e:
+                print(f"[ERROR] Exception in _on_layer_toggled: {e}")
+        else:
+            print(f"[ERROR] UUID {uuid} not found in self._layers!")
+
+    def _get_sidebar_settings(self):
+        color_controls = self.sidebar.color_controls
+        point_size_controls = self.sidebar.point_size_controls
+        return {
+            'dimension': color_controls.dimension_box.currentText(),
+            'colormap': color_controls.colormap_box.currentText(),
+            'color_start': getattr(color_controls, 'color_start', None),
+            'color_mid': getattr(color_controls, 'color_mid', None),
+            'color_end': getattr(color_controls, 'color_end', None),
+            'point_size': point_size_controls.get_point_size() if hasattr(point_size_controls, 'get_point_size') else None,
+        }
+
+    def _set_sidebar_settings(self, settings):
+        color_controls = self.sidebar.color_controls
+        point_size_controls = self.sidebar.point_size_controls
+        if 'dimension' in settings:
+            idx = color_controls.dimension_box.findText(settings['dimension'])
+            if idx != -1:
+                color_controls.dimension_box.setCurrentIndex(idx)
+        if 'colormap' in settings:
+            idx = color_controls.colormap_box.findText(settings['colormap'])
+            if idx != -1:
+                color_controls.colormap_box.setCurrentIndex(idx)
+        if 'color_start' in settings and hasattr(color_controls, 'color_start'):
+            color_controls.color_start = settings['color_start']
+        if 'color_mid' in settings and hasattr(color_controls, 'color_mid'):
+            color_controls.color_mid = settings['color_mid']
+        if 'color_end' in settings and hasattr(color_controls, 'color_end'):
+            color_controls.color_end = settings['color_end']
+        if 'point_size' in settings and hasattr(point_size_controls, 'set_point_size'):
+            point_size_controls.set_point_size(settings['point_size'])
 
 
 
@@ -321,9 +420,12 @@ def main():
     window = MainWindow(las_data=las_data, default_file=default_file)
     splash.finish(window)
     print("[INFO] Main window shown. Application running.")
-    window.showMaximized()
-    window.raise_()  # Bring window to front
-    window.activateWindow()  # Focus window
+    from PySide6.QtCore import QTimer
+    def show_and_raise():
+        window.showMaximized()
+        window.raise_()
+        window.activateWindow()
+    QTimer.singleShot(0, show_and_raise)
     sys.exit(app.exec())
 
 if __name__ == "__main__":
