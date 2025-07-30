@@ -69,7 +69,6 @@ class PointCloudViewer(QWidget):
 
     def display_point_cloud(self, points, scalars=None, cmap=None, return_actor=False):
         print(f"[DEBUG] display_point_cloud called: points.shape={getattr(points, 'shape', None)}, return_actor={return_actor}")
-        self.plotter.clear()
         scalar_bar_args = {}
         # Set scalar bar text color based on theme
         if hasattr(self, '_theme') and self._theme == "Dark":
@@ -90,7 +89,6 @@ class PointCloudViewer(QWidget):
             )
         else:
             actor = self.plotter.add_points(points, color="#3daee9", render_points_as_spheres=True, point_size=point_size)
-        self.plotter.reset_camera()
         self.plotter.update()
         if return_actor:
             return actor

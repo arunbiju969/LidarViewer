@@ -64,6 +64,7 @@ class LayerManagerWidget(QWidget):
     def _on_select(self, current, previous):
         uuid = self.get_selected_uuid()
         if uuid:
+            print(f"[DEBUG] Emitting layer_selected: uuid={uuid}")
             self.layer_selected.emit(uuid)
 
     def _on_item_changed(self, item):

@@ -301,10 +301,11 @@ class MainWindow(QMainWindow):
             self._points = data["points"]
             self._current_layer_id = generate_layer_id()
             self._current_file_path = file_path
-            # Add to layers dict
+            # Add to layers dict, now also store las per layer
             self._layers[self._current_layer_id] = {
                 'file_path': file_path,
                 'points': self._points,
+                'las': self._las,
                 'visible': True,
                 'actor': None  # Will be set below
             }
@@ -346,16 +347,40 @@ class MainWindow(QMainWindow):
             print("[DEBUG] _update_all_layers_in_viewer: clearing plotter")
             self.viewer.plotter.clear()
         # Add all visible layers
+
+        from fileio.las_loader import get_normalized_scalars
         for uuid, layer in self._layers.items():
             if layer['visible']:
-                # Add to plotter and store actor
                 print("[DEBUG] _update_all_layers_in_viewer: adding visible layers")
                 print(f"[DEBUG] Layer {uuid}: visible={layer['visible']}")
                 print(f"[DEBUG] Calling display_point_cloud for layer {uuid}")
-                actor = self.viewer.display_point_cloud(layer['points'], return_actor=True)
+                settings = load_layer_settings(uuid)
+                if settings:
+                    # Use per-layer LAS object
+                    las = layer.get('las', None)
+                    dim_name = settings.get('dimension')
+                    colormap = settings.get('colormap')
+                    point_size = settings.get('point_size')
+                    scalars = None
+                    if las is not None and dim_name and dim_name in las:
+                        scalars = get_normalized_scalars(las, dim_name)
+                    actor = self.viewer.display_point_cloud(
+                        layer['points'],
+                        scalars=scalars,
+                        cmap=colormap,
+                        return_actor=True
+                    )
+                    if point_size is not None and hasattr(self.viewer, 'set_point_size'):
+                        self.viewer.set_point_size(point_size)
+                else:
+                    actor = self.viewer.display_point_cloud(layer['points'], return_actor=True)
                 self._layers[uuid]['actor'] = actor
             else:
                 self._layers[uuid]['actor'] = None
+
+        # Debug print: list all actors present
+        actors_present = {uuid: l['actor'] is not None for uuid, l in self._layers.items()}
+        print(f"[DEBUG] Actors present after update: {actors_present}")
 
     def _on_layer_toggled(self, uuid, checked):
         print(f"[DEBUG] _on_layer_toggled: id(self)={id(self)}, uuid={uuid}, checked={checked}")
@@ -363,20 +388,28 @@ class MainWindow(QMainWindow):
         if uuid in self._layers:
             self._layers[uuid]['visible'] = checked
             try:
+                # Always update the plotter to show all visible layers
+                self._update_all_layers_in_viewer()
                 if checked:
-                    # Restore sidebar settings for this layer and update viewer
+                    # Restore sidebar settings for this layer (active layer logic)
                     settings = load_layer_settings(uuid)
                     if settings:
                         print(f"[DEBUG] Restoring sidebar settings for layer {uuid}")
                         self._set_sidebar_settings(settings)
                     self._current_layer_id = uuid
                     self._current_file_path = self._layers[uuid]['file_path']
-                    # Redraw plotter for this layer with restored settings
-                    self._on_color_by_changed()
                 else:
-                    # Just update the plotter to remove the layer
-                    print("[DEBUG] Toggling layer OFF, updating all layers in viewer")
-                    self._update_all_layers_in_viewer()
+                    print("[DEBUG] Toggling layer OFF, updated all layers in viewer")
+                    # Optionally, update sidebar to next visible layer if only one remains
+                    visible_uuids = [u for u, l in self._layers.items() if l['visible']]
+                    if len(visible_uuids) == 1:
+                        next_uuid = visible_uuids[0]
+                        print(f"[DEBUG] Restoring sidebar settings for only remaining visible layer {next_uuid}")
+                        settings = load_layer_settings(next_uuid)
+                        if settings:
+                            self._set_sidebar_settings(settings)
+                            self._current_layer_id = next_uuid
+                            self._current_file_path = self._layers[next_uuid]['file_path']
             except Exception as e:
                 print(f"[ERROR] Exception in _on_layer_toggled: {e}")
         else:
