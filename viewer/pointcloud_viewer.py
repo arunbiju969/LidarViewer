@@ -5,6 +5,17 @@ from PySide6.QtWidgets import QWidget, QHBoxLayout
 class PointCloudViewer(QWidget):
     def set_point_size(self, size):
         self._point_size = size
+        # Update point size for all actors in the plotter
+        actors = getattr(self.plotter.renderer, 'actors', {})
+        if hasattr(actors, 'values'):
+            for actor in actors.values():
+                try:
+                    actor.GetProperty().SetPointSize(size)
+                    #print(f"[DEBUG] Updated actor {actor} point size to: {size}")
+                except Exception as e:
+                    print(f"[ERROR] Failed to set point size for actor {actor}: {e}")
+        else:
+            print("[WARN] No actors found in plotter renderer to update point size.")
         self.plotter.update()
     def set_theme(self, theme):
         """Set plotter background and default colormap based on theme."""

@@ -22,20 +22,12 @@ class MainWindow(QMainWindow):
     def _on_point_size_changed(self, value):
         print(f"[DEBUG] Point size changed to: {value}")
         self.viewer.set_point_size(value)
-        # Save to DB
+        # Always update plotter in real time
+        self._on_color_by_changed()
+        # Always save to DB
         if hasattr(self, '_current_layer_id') and self._current_layer_id and hasattr(self, '_current_file_path') and self._current_file_path:
             print(f"[DB] Saving sidebar settings to DB for layer {self._current_layer_id}: {self._get_sidebar_settings()}")
             save_layer_settings(self._current_layer_id, self._current_file_path, self._get_sidebar_settings())
-            # Reload settings from DB and apply
-            settings = load_layer_settings(self._current_layer_id)
-            print(f"[DB] Reloaded sidebar settings from DB after point size change for layer {self._current_layer_id}: {settings}")
-            if settings:
-                print(f"[PLOTTER] Redrawing plotter using DB values after point size change for layer {self._current_layer_id}")
-                self._set_sidebar_settings(settings)
-                self._on_color_by_changed()
-        else:
-            # Re-apply color mapping so color and point size are both respected
-            self._on_color_by_changed()
     def _on_projection_changed(self, index=None):
         # 0: Parallel, 1: Perspective
         if hasattr(self.viewer, 'plotter') and hasattr(self.viewer.plotter, 'camera') and self.viewer.plotter.camera is not None:
@@ -91,25 +83,38 @@ class MainWindow(QMainWindow):
             self.viewer._colormap = colormap
             self.viewer.display_point_cloud(self._points)
             return
-        # Use loader utility to get normalized scalars
-        norm_scalars = get_normalized_scalars(self._las, dim_name)
-
-        # Handle custom colormap
-        if colormap == "Custom":
-            # Get user-selected colors directly from the pickers for immediate update
-            start = self.sidebar.color_controls.color_start
-            mid = self.sidebar.color_controls.color_mid
-            end = self.sidebar.color_controls.color_end
-            print(f"[DEBUG] Custom color changed: start={start}, mid={mid}, end={end}")
-            # Create a custom colormap
-            cmap = mcolors.LinearSegmentedColormap.from_list(
-                "custom_gradient", [start, mid, end]
-            )
-            self.viewer.display_point_cloud(self._points, scalars=norm_scalars, cmap=cmap)
+        # Always write to DB, but only update plotter if current layer is visible
+        is_visible = (
+            hasattr(self, '_current_layer_id') and
+            self._current_layer_id in self._layers and
+            self._layers[self._current_layer_id].get('visible', False)
+        )
+        if not is_visible:
+            print("[DEBUG] Current layer is not visible; skipping plotter update but writing to DB.")
         else:
-            self.viewer._colormap = colormap
-            self.viewer.display_point_cloud(self._points, scalars=norm_scalars)
-        # Save current sidebar settings to DB for this layer
+            # Use loader utility to get normalized scalars
+            norm_scalars = get_normalized_scalars(self._las, dim_name)
+            # Handle custom colormap
+            if colormap == "Custom":
+                # Get user-selected colors directly from the pickers for immediate update
+                start = self.sidebar.color_controls.color_start
+                mid = self.sidebar.color_controls.color_mid
+                end = self.sidebar.color_controls.color_end
+                print(f"[DEBUG] Custom color changed: start={start}, mid={mid}, end={end}")
+                # Create a custom colormap
+                cmap = mcolors.LinearSegmentedColormap.from_list(
+                    "custom_gradient", [start, mid, end]
+                )
+                self.viewer.display_point_cloud(self._points, scalars=norm_scalars, cmap=cmap)
+            else:
+                self.viewer._colormap = colormap
+                self.viewer.display_point_cloud(self._points, scalars=norm_scalars)
+            # Always set the point size after drawing
+            point_size = self.sidebar.point_size_controls.get_point_size() if hasattr(self.sidebar.point_size_controls, 'get_point_size') else None
+            if point_size is not None:
+                print(f"[DEBUG] Setting plotter point size to: {point_size}")
+                self.viewer.set_point_size(point_size)
+        # Save current sidebar settings to DB for this layer (always)
         if hasattr(self, '_current_layer_id') and self._current_layer_id and hasattr(self, '_current_file_path') and self._current_file_path:
             print(f"[DB] Saving sidebar settings to DB for layer {self._current_layer_id}: {self._get_sidebar_settings()}")
             save_layer_settings(self._current_layer_id, self._current_file_path, self._get_sidebar_settings())
@@ -134,6 +139,8 @@ class MainWindow(QMainWindow):
         self.sidebar.setObjectName("sidebar")
         # Connect layer manager's layer_toggled signal to this window's handler
         self.sidebar.layer_manager.layer_toggled.connect(self._on_layer_toggled)
+        # Connect layer_selected signal to handler
+        self.sidebar.layer_manager.layer_selected.connect(self._on_layer_selected)
         # Menu bar style is now set in _update_theme() for theme support
         print(f"[DEBUG] SidebarWidget created: {self.sidebar}")
         # Set callback for custom color pickers
@@ -205,6 +212,24 @@ class MainWindow(QMainWindow):
             self._current_layer_id = None
             if self._metadata_action:
                 self._metadata_action.setEnabled(False)
+    
+    def _on_layer_selected(self, uuid):
+        print(f"[DEBUG] _on_layer_selected called with uuid={uuid}")
+        if uuid not in self._layers:
+            print(f"[ERROR] _on_layer_selected: UUID {uuid} not found in self._layers!")
+            return
+        self._current_layer_id = uuid
+        self._current_file_path = self._layers[uuid]['file_path']
+
+        print(f"[DEBUG] Updated _current_layer_id: {self._current_layer_id}, _current_file_path: {self._current_file_path}")
+        settings = load_layer_settings(uuid)
+
+        print(f"[DEBUG] Loaded settings from DB for uuid={uuid}: {settings}")
+        if settings:
+            self._set_sidebar_settings(settings)
+            print(f"[DEBUG] Applied settings to sidebar for uuid={uuid}")
+        else:
+            print(f"[WARN] No settings found in DB for uuid={uuid}")
 
 
 
@@ -447,6 +472,8 @@ class MainWindow(QMainWindow):
             color_controls.color_end = settings['color_end']
         if 'point_size' in settings and hasattr(point_size_controls, 'set_point_size'):
             point_size_controls.set_point_size(settings['point_size'])
+        # Plotter update intentionally not triggered here to avoid infinite update loop
+        print("[DEBUG] Sidebar settings applied from DB (plotter update not triggered here).")
 
 
 
