@@ -22,8 +22,20 @@ class MainWindow(QMainWindow):
     def _on_point_size_changed(self, value):
         print(f"[DEBUG] Point size changed to: {value}")
         self.viewer.set_point_size(value)
-        # Re-apply color mapping so color and point size are both respected
-        self._on_color_by_changed()
+        # Save to DB
+        if hasattr(self, '_current_layer_id') and self._current_layer_id and hasattr(self, '_current_file_path') and self._current_file_path:
+            print(f"[DB] Saving sidebar settings to DB for layer {self._current_layer_id}: {self._get_sidebar_settings()}")
+            save_layer_settings(self._current_layer_id, self._current_file_path, self._get_sidebar_settings())
+            # Reload settings from DB and apply
+            settings = load_layer_settings(self._current_layer_id)
+            print(f"[DB] Reloaded sidebar settings from DB after point size change for layer {self._current_layer_id}: {settings}")
+            if settings:
+                print(f"[PLOTTER] Redrawing plotter using DB values after point size change for layer {self._current_layer_id}")
+                self._set_sidebar_settings(settings)
+                self._on_color_by_changed()
+        else:
+            # Re-apply color mapping so color and point size are both respected
+            self._on_color_by_changed()
     def _on_projection_changed(self, index=None):
         # 0: Parallel, 1: Perspective
         if hasattr(self.viewer, 'plotter') and hasattr(self.viewer.plotter, 'camera') and self.viewer.plotter.camera is not None:
@@ -99,7 +111,15 @@ class MainWindow(QMainWindow):
             self.viewer.display_point_cloud(self._points, scalars=norm_scalars)
         # Save current sidebar settings to DB for this layer
         if hasattr(self, '_current_layer_id') and self._current_layer_id and hasattr(self, '_current_file_path') and self._current_file_path:
+            print(f"[DB] Saving sidebar settings to DB for layer {self._current_layer_id}: {self._get_sidebar_settings()}")
             save_layer_settings(self._current_layer_id, self._current_file_path, self._get_sidebar_settings())
+            # Reload settings from DB and apply
+            settings = load_layer_settings(self._current_layer_id)
+            print(f"[DB] Reloaded sidebar settings from DB after color/colormap change for layer {self._current_layer_id}: {settings}")
+            if settings:
+                print(f"[PLOTTER] Redrawing plotter using DB values after color/colormap change for layer {self._current_layer_id}")
+                self._set_sidebar_settings(settings)
+                # Redraw plotter using DB settings (avoid infinite loop by not calling _on_color_by_changed again)
     SETTINGS_FILE = "settings.json"
 
 
@@ -375,6 +395,7 @@ class MainWindow(QMainWindow):
         }
 
     def _set_sidebar_settings(self, settings):
+        print(f"[DB->SIDEBAR] Applying settings from DB to sidebar: {settings}")
         color_controls = self.sidebar.color_controls
         point_size_controls = self.sidebar.point_size_controls
         if 'dimension' in settings:
@@ -399,33 +420,16 @@ class MainWindow(QMainWindow):
 def main():
     print("[INFO] Application starting...")
     app = QApplication(sys.argv)
-
-    # Show splash screen and progress bar
-    print("[INFO] Showing splash screen...")
-    splash, progress_bar = create_splash()
-    splash.show()
-    app.processEvents()
-
-    # Load default file from settings.json using fileio.las_loader
-    las_data = None
-    default_file = None
-    settings_path = os.path.join(os.path.dirname(__file__), "settings.json")
-    from fileio.las_loader import load_default_las_with_progress
-    print("[INFO] Loading default file with progress bar...")
-    las_data, default_file = load_default_las_with_progress(settings_path, progress_bar)
-    app.processEvents()
-
-    # Hide splash and show main window
-    print("[INFO] Initializing main window...")
-    window = MainWindow(las_data=las_data, default_file=default_file)
-    splash.finish(window)
-    print("[INFO] Main window shown. Application running.")
+    print("[INFO] Initializing main window (no default file)...")
+    window = MainWindow()
+    window.show()
     from PySide6.QtCore import QTimer
     def show_and_raise():
         window.showMaximized()
         window.raise_()
         window.activateWindow()
     QTimer.singleShot(0, show_and_raise)
+    print("[INFO] Main window shown. Application running.")
     sys.exit(app.exec())
 
 if __name__ == "__main__":
