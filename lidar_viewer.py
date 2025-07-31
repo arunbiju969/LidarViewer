@@ -33,7 +33,11 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     print(f"[WARN] Could not remove actor for layer {uuid}: {e}")
             if layer['visible']:
-                settings = load_layer_settings(uuid)
+                # For the current layer, use the in-memory sidebar settings
+                if hasattr(self, '_current_layer_id') and uuid == self._current_layer_id:
+                    settings = self._get_sidebar_settings()
+                else:
+                    settings = load_layer_settings(uuid)
                 las = layer.get('las', None)
                 dim_name = settings.get('dimension') if settings else None
                 colormap = settings.get('colormap') if settings else None
@@ -65,12 +69,8 @@ class MainWindow(QMainWindow):
                 point_size = settings.get('point_size') if settings else None
                 if point_size is not None and hasattr(self.viewer, 'set_point_size'):
                     self.viewer.set_point_size(point_size, actor=actor)
-        # Remove scalar bar/legend if present
+        # Update the plotter after drawing all layers
         if hasattr(self.viewer, 'plotter'):
-            try:
-                self.viewer.plotter.remove_scalar_bar()
-            except Exception as e:
-                print(f"[WARN] Could not remove scalar bar: {e}")
             self.viewer.plotter.update()
         actors_present = {uuid: l['actor'] is not None for uuid, l in self._layers.items()}
         print(f"[PLOTTER] Actors present after plot_all_layers: {actors_present}")
@@ -207,6 +207,9 @@ class MainWindow(QMainWindow):
         self.sidebar.layer_manager.layer_toggled.connect(self._on_layer_toggled)
         # Connect layer_selected signal to handler
         self.sidebar.layer_manager.layer_selected.connect(self._on_layer_selected)
+        # Connect add/remove signals to actual logic
+        self.sidebar.layer_manager.layer_added.connect(self._on_layer_added)
+        self.sidebar.layer_manager.layer_removed.connect(self._on_layer_removed_debug)
         # Menu bar style is now set in _update_theme() for theme support
         print(f"[DEBUG] SidebarWidget created: {self.sidebar}")
         # Set callback for custom color pickers
@@ -220,11 +223,9 @@ class MainWindow(QMainWindow):
         # Set initial point size in viewer (after viewer is created)
         self.viewer.set_point_size(self.sidebar.point_size_controls.get_point_size())
         print("[INFO] Sidebar and Viewer widgets created.")
-
         self._current_file_path = None  # Track currently loaded file
         self._current_layer_id = None   # Track currently loaded layer UUID
         self._metadata_action = None    # Reference to metadata menu action
-
         main_layout = QHBoxLayout()
         main_layout.addWidget(self.sidebar)
         main_layout.addWidget(self.viewer, stretch=1)
@@ -232,17 +233,14 @@ class MainWindow(QMainWindow):
         container.setLayout(main_layout)
         self.setCentralWidget(container)
         print("[INFO] Main layout and central widget set.")
-
         self._create_menu_bar()
         print("[INFO] Menu bar created.")
-
         # Set dark mode as default
         self.sidebar.theme_box.setCurrentText("Dark")
         self.sidebar.theme_box.currentIndexChanged.connect(self._update_theme)
         self._update_theme()
         self.viewer.set_theme("Dark")
         print("[INFO] Theme initialized.")
-
         # Connect color by and colormap dropdowns to coloring logic (disconnect first to avoid duplicates)
         try:
             self.sidebar.color_controls.dimension_box.currentIndexChanged.disconnect()
@@ -313,6 +311,59 @@ class MainWindow(QMainWindow):
             print(f"[DEBUG] Applied settings to sidebar for uuid={uuid}")
         else:
             print(f"[WARN] No settings found in DB for uuid={uuid}")
+    
+
+    def _on_layer_added(self):
+        print("[DEBUG] _on_layer_added: Add button pressed, opening file dialog...")
+        file_path, _ = QFileDialog.getOpenFileName(self, "Select a LAS or LAZ file to add as a new layer", "", "LAS/LAZ Files (*.las *.laz)")
+        if not file_path:
+            print("[DEBUG] _on_layer_added: No file selected.")
+            return
+        print(f"[DEBUG] _on_layer_added: File selected: {file_path}")
+        from fileio.las_loader import load_point_cloud_data
+        try:
+            data = load_point_cloud_data(file_path)
+            points = data["points"]
+            las = data["las"]
+            cloud = data["cloud"]
+            uuid = generate_layer_id()
+            self._layers[uuid] = {
+                'file_path': file_path,
+                'points': points,
+                'las': las,
+                'visible': True,
+                'actor': None
+            }
+            self._current_layer_id = uuid
+            self._current_file_path = file_path
+            # Save default sidebar settings for new layer
+            default_settings = self._get_sidebar_settings()
+            save_layer_settings(uuid, file_path, default_settings)
+            # Plot all layers (the current layer will use the in-memory sidebar settings)
+            self.plot_all_layers()
+            # Ensure plotter camera and axes are updated for new layer
+            if hasattr(self.viewer, 'plotter'):
+                try:
+                    self.viewer.plotter.add_axes()
+                except Exception as e:
+                    print(f"[WARN] Could not add axes: {e}")
+                try:
+                    self.viewer.plotter.reset_camera()
+                except Exception as e:
+                    print(f"[WARN] Could not reset camera: {e}")
+            all_layers = [(u, l['file_path']) for u, l in self._layers.items()]
+            checked_uuids = set(u for u, l in self._layers.items() if l['visible'])
+            self.sidebar.update_layers(all_layers, current_uuid=uuid, checked_uuids=checked_uuids)
+            self.sidebar.set_status(f"Added: {os.path.basename(file_path)} ({points.shape[0]} points)")
+            self.sidebar.update_file_info(os.path.basename(file_path), points.shape[0])
+            self.sidebar.update_dimensions(data["dims"])
+            print(f"[INFO] Added new layer: {file_path} ({points.shape[0]} points)")
+        except Exception as e:
+            print(f"[ERROR] Failed to add new layer from file: {file_path}: {e}")
+            self.sidebar.set_status(f"Failed to add: {os.path.basename(file_path)}")
+
+    def _on_layer_removed_debug(self, uuid):
+        print(f"[DEBUG] layer_removed signal received from LayerManagerWidget (Remove button pressed), uuid={uuid}")
 
 
 
@@ -444,7 +495,6 @@ class MainWindow(QMainWindow):
             self.sidebar.color_controls.colormap_box.currentIndexChanged.connect(self._on_color_by_changed)
             if self._metadata_action:
                 self._metadata_action.setEnabled(True)
-            self.plot_all_layers()
             save_layer_settings(self._current_layer_id, self._current_file_path, self._get_sidebar_settings())
             # Update the layer manager with all layers, checked state reflects visibility
             all_layers = [(uuid, l['file_path']) for uuid, l in self._layers.items()]
