@@ -19,7 +19,26 @@ class ViewToolbar(QToolBar):
             ("Front", self.viewer.set_front_view),
             ("Back", self.viewer.set_back_view),
         ]
-        for name, handler in view_actions:
+        for i, (name, handler) in enumerate(view_actions):
             action = QAction(name, self)
             action.triggered.connect(handler)
             self.addAction(action)
+            if i < len(view_actions) - 1:
+                self.addSeparator()
+        # Apply dark mode hover style (blue highlight)
+        self.setStyleSheet("""
+        QToolBar QPushButton {
+            background: transparent;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+        }
+        QToolBar QPushButton:hover {
+            background: #3daee9;
+            color: white;
+        }
+        QToolBar {
+            background: #232629;
+        }
+        """)
