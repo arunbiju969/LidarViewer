@@ -1,8 +1,5 @@
-import pyvista as pv
-import numpy as np
 import os
 import sys
-
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QFileDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QGroupBox, QFormLayout, QComboBox
 )
@@ -29,6 +26,12 @@ class MainWindow(QMainWindow):
             self.viewer.plotter.clear()
         from fileio.las_loader import get_normalized_scalars
         for uuid, layer in self._layers.items():
+            actor = layer.get('actor', None)
+            if actor is not None and hasattr(self.viewer, 'plotter'):
+                try:
+                    self.viewer.plotter.remove_actor(actor)
+                except Exception as e:
+                    print(f"[WARN] Could not remove actor for layer {uuid}: {e}")
             if layer['visible']:
                 settings = load_layer_settings(uuid)
                 las = layer.get('las', None)
@@ -48,7 +51,6 @@ class MainWindow(QMainWindow):
                     except Exception as e:
                         print(f"[WARN] Failed to create custom colormap, falling back to 'viridis': {e}")
                         colormap = 'viridis'
-                point_size = settings.get('point_size') if settings else None
                 scalars = None
                 if las is not None and dim_name and dim_name in las:
                     scalars = get_normalized_scalars(las, dim_name)
@@ -60,10 +62,9 @@ class MainWindow(QMainWindow):
                     show_scalar_bar=False
                 )
                 self._layers[uuid]['actor'] = actor
+                point_size = settings.get('point_size') if settings else None
                 if point_size is not None and hasattr(self.viewer, 'set_point_size'):
                     self.viewer.set_point_size(point_size, actor=actor)
-            else:
-                self._layers[uuid]['actor'] = None
         # Remove scalar bar/legend if present
         if hasattr(self.viewer, 'plotter'):
             try:
@@ -79,8 +80,66 @@ class MainWindow(QMainWindow):
         if hasattr(self, '_current_layer_id') and self._current_layer_id and hasattr(self, '_current_file_path') and self._current_file_path:
             print(f"[DB] Saving sidebar settings to DB for layer {self._current_layer_id}: {self._get_sidebar_settings()}")
             save_layer_settings(self._current_layer_id, self._current_file_path, self._get_sidebar_settings())
-        # Always update plotter in real time
-        self.plot_all_layers()
+        # Only update the actor for the current layer
+        if hasattr(self, '_current_layer_id') and self._current_layer_id in self._layers:
+            actor = self._layers[self._current_layer_id].get('actor', None)
+            if actor is not None and hasattr(self.viewer, 'set_point_size'):
+                self.viewer.set_point_size(value, actor=actor)
+                if hasattr(self.viewer, 'plotter'):
+                    self.viewer.plotter.update()
+            else:
+                print(f"[WARN] No actor found for current layer {self._current_layer_id}, redrawing layer.")
+                self._redraw_current_layer()
+
+    def _redraw_current_layer(self):
+        # Remove and re-add only the current layer's actor
+        if not (hasattr(self, '_current_layer_id') and self._current_layer_id in self._layers):
+            print("[WARN] _redraw_current_layer: No current layer to redraw.")
+            return
+        uuid = self._current_layer_id
+        layer = self._layers[uuid]
+        if hasattr(self.viewer, 'plotter'):
+            actor = layer.get('actor', None)
+            if actor is not None:
+                try:
+                    self.viewer.plotter.remove_actor(actor)
+                except Exception as e:
+                    print(f"[WARN] Could not remove actor for layer {uuid}: {e}")
+        settings = load_layer_settings(uuid)
+        las = layer.get('las', None)
+        dim_name = settings.get('dimension') if settings else None
+        colormap = settings.get('colormap') if settings else None
+        point_size = settings.get('point_size') if settings else None
+        scalars = None
+        if las is not None and dim_name and dim_name in las:
+            from fileio.las_loader import get_normalized_scalars
+            scalars = get_normalized_scalars(las, dim_name)
+        # Handle custom colormap
+        if colormap == "Custom":
+            try:
+                from matplotlib.colors import LinearSegmentedColormap
+                color_start = settings.get('color_start', '#0000ff') or '#0000ff'
+                color_mid = settings.get('color_mid', '#00ff00') or '#00ff00'
+                color_end = settings.get('color_end', '#ff0000') or '#ff0000'
+                custom_cmap = LinearSegmentedColormap.from_list(
+                    'custom_cmap', [color_start, color_mid, color_end]
+                )
+                colormap = custom_cmap
+            except Exception as e:
+                print(f"[WARN] Failed to create custom colormap, falling back to 'viridis': {e}")
+                colormap = 'viridis'
+        actor = self.viewer.display_point_cloud(
+            layer['points'],
+            scalars=scalars,
+            cmap=colormap,
+            return_actor=True,
+            show_scalar_bar=False
+        )
+        self._layers[uuid]['actor'] = actor
+        if point_size is not None and hasattr(self.viewer, 'set_point_size'):
+            self.viewer.set_point_size(point_size, actor=actor)
+        if hasattr(self.viewer, 'plotter'):
+            self.viewer.plotter.update()
     def _on_projection_changed(self, index=None):
         # 0: Parallel, 1: Perspective
         if hasattr(self.viewer, 'plotter') and hasattr(self.viewer.plotter, 'camera') and self.viewer.plotter.camera is not None:
@@ -125,12 +184,13 @@ class MainWindow(QMainWindow):
             print("[DEBUG] Colormap already 'Custom', updating coloring now")
             self._on_color_by_changed()
     def _on_color_by_changed(self, index=None):
+        print("[DEBUG] _on_color_by_changed called")
         # Always save to DB
         if hasattr(self, '_current_layer_id') and self._current_layer_id and hasattr(self, '_current_file_path') and self._current_file_path:
             print(f"[DB] Saving sidebar settings to DB for layer {self._current_layer_id}: {self._get_sidebar_settings()}")
             save_layer_settings(self._current_layer_id, self._current_file_path, self._get_sidebar_settings())
-        # Always update plotter in real time
-        self.plot_all_layers()
+        # Only redraw the current layer
+        self._redraw_current_layer()
     SETTINGS_FILE = "settings.json"
 
 
@@ -183,7 +243,15 @@ class MainWindow(QMainWindow):
         self.viewer.set_theme("Dark")
         print("[INFO] Theme initialized.")
 
-        # Connect color by and colormap dropdowns to coloring logic
+        # Connect color by and colormap dropdowns to coloring logic (disconnect first to avoid duplicates)
+        try:
+            self.sidebar.color_controls.dimension_box.currentIndexChanged.disconnect()
+        except Exception:
+            pass
+        try:
+            self.sidebar.color_controls.colormap_box.currentIndexChanged.disconnect()
+        except Exception:
+            pass
         self.sidebar.color_controls.dimension_box.currentIndexChanged.connect(self._on_color_by_changed)
         self.sidebar.color_controls.colormap_box.currentIndexChanged.connect(self._on_color_by_changed)
         # Connect projection box to projection handler
@@ -203,6 +271,15 @@ class MainWindow(QMainWindow):
             self.sidebar.set_status(f"Loaded: {os.path.basename(default_file)} ({self._points.shape[0]} points)")
             self.sidebar.update_file_info(os.path.basename(default_file), self._points.shape[0])
             self.sidebar.update_dimensions(data["dims"])
+            # Disconnect before reconnecting to avoid duplicate slot calls
+            try:
+                self.sidebar.color_controls.dimension_box.currentIndexChanged.disconnect()
+            except Exception:
+                pass
+            try:
+                self.sidebar.color_controls.colormap_box.currentIndexChanged.disconnect()
+            except Exception:
+                pass
             self.sidebar.color_controls.dimension_box.currentIndexChanged.connect(self._on_color_by_changed)
             self.sidebar.color_controls.colormap_box.currentIndexChanged.connect(self._on_color_by_changed)
             self._current_file_path = default_file
@@ -354,6 +431,15 @@ class MainWindow(QMainWindow):
             status_msg = f"Loaded: {os.path.basename(file_path)} ({self._points.shape[0]} points)"
             self.sidebar.update_file_info(os.path.basename(file_path), self._points.shape[0])
             self.sidebar.update_dimensions(data["dims"])
+            # Disconnect before reconnecting to avoid duplicate slot calls
+            try:
+                self.sidebar.color_controls.dimension_box.currentIndexChanged.disconnect()
+            except Exception:
+                pass
+            try:
+                self.sidebar.color_controls.colormap_box.currentIndexChanged.disconnect()
+            except Exception:
+                pass
             self.sidebar.color_controls.dimension_box.currentIndexChanged.connect(self._on_color_by_changed)
             self.sidebar.color_controls.colormap_box.currentIndexChanged.connect(self._on_color_by_changed)
             if self._metadata_action:
