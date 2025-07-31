@@ -161,6 +161,9 @@ class MainWindow(QMainWindow):
         # Set initial point size in viewer (after viewer is created)
         self.viewer.set_point_size(self.sidebar.point_size_controls.get_point_size())
         print("[INFO] Sidebar and Viewer widgets created.")
+        # Integrate point picking (enabled by default)
+        from point_picking.point_picker import PointPicker
+        self.point_picker = PointPicker(self.viewer)
         # self._current_file_path and self._current_layer_id are now managed by LayerManager
         self._metadata_action = None    # Reference to metadata menu action
         from viewer.view_toolbar import ViewToolbar

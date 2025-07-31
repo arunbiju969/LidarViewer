@@ -127,10 +127,11 @@ class PointCloudViewer(QWidget):
                 render_points_as_spheres=True,
                 point_size=point_size,
                 scalar_bar_args=scalar_bar_args,
-                show_scalar_bar=show_scalar_bar
+                show_scalar_bar=show_scalar_bar,
+                pickable=True
             )
         else:
-            actor = self.plotter.add_points(points, color="#3daee9", render_points_as_spheres=True, point_size=point_size)
+            actor = self.plotter.add_points(points, color="#3daee9", render_points_as_spheres=True, point_size=point_size, pickable=True)
         self.plotter.update()
         if return_actor:
             return actor
