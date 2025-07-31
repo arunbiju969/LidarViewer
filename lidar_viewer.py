@@ -16,6 +16,10 @@ from layers.layer_db import save_layer_settings, load_layer_settings, generate_l
 
 print("[INFO] Starting lidar_viewer.py")
 class MainWindow(QMainWindow):
+    def _create_view_toolbar(self):
+        from viewer.view_toolbar import ViewToolbar
+        toolbar = ViewToolbar(self.viewer, parent=self)
+        self.addToolBar(toolbar)
     def _show_bounding_box_for_current_layer(self):
         """
         Display a bounding box for the currently selected layer in the viewer.
@@ -159,9 +163,16 @@ class MainWindow(QMainWindow):
         print("[INFO] Sidebar and Viewer widgets created.")
         # self._current_file_path and self._current_layer_id are now managed by LayerManager
         self._metadata_action = None    # Reference to metadata menu action
+        from viewer.view_toolbar import ViewToolbar
         main_layout = QHBoxLayout()
         main_layout.addWidget(self.sidebar)
-        main_layout.addWidget(self.viewer, stretch=1)
+        # Create a vertical layout for toolbar + viewer
+        viewer_vlayout = QVBoxLayout()
+        self.view_toolbar = ViewToolbar(self.viewer, parent=self)
+        # Add toolbar with alignment left, no stretch
+        viewer_vlayout.addWidget(self.view_toolbar, alignment=Qt.AlignLeft)
+        viewer_vlayout.addWidget(self.viewer, stretch=1)
+        main_layout.addLayout(viewer_vlayout, stretch=1)
         container = QWidget()
         container.setLayout(main_layout)
         self.setCentralWidget(container)

@@ -3,6 +3,29 @@ from pyvistaqt import QtInteractor
 from PySide6.QtWidgets import QWidget, QHBoxLayout
 
 class PointCloudViewer(QWidget):
+    def set_back_view(self):
+        """Set the camera to the back view (opposite of front view, using bounds)."""
+        if hasattr(self, 'plotter') and hasattr(self.plotter, 'camera'):
+            bounds = None
+            if hasattr(self.plotter, 'bounds') and self.plotter.bounds is not None:
+                bounds = self.plotter.bounds
+            elif hasattr(self, 'last_bounds'):
+                bounds = self.last_bounds
+            if bounds and all(b is not None for b in bounds):
+                xmin, xmax, ymin, ymax, zmin, zmax = bounds
+                center = [0.5 * (xmin + xmax), 0.5 * (ymin + ymax), 0.5 * (zmin + zmax)]
+                dist = max(xmax - xmin, ymax - ymin, zmax - zmin) * 2
+                # For back view, move camera in +Y direction (opposite of front)
+                position = [center[0], center[1] + dist, center[2]]
+                self.plotter.camera.SetPosition(*position)
+                self.plotter.camera.SetFocalPoint(*center)
+                self.plotter.camera.SetViewUp(0, 0, 1)
+                self.plotter.reset_camera()
+                self.plotter.update()
+            else:
+                print("[WARN] set_back_view: Could not determine bounds for camera positioning.")
+        else:
+            print("[WARN] set_back_view: plotter or camera not available.")
     def set_point_size(self, size, actor=None):
         self._point_size = size
         if actor is not None:
