@@ -3,19 +3,26 @@ from pyvistaqt import QtInteractor
 from PySide6.QtWidgets import QWidget, QHBoxLayout
 
 class PointCloudViewer(QWidget):
-    def set_point_size(self, size):
+    def set_point_size(self, size, actor=None):
         self._point_size = size
-        # Update point size for all actors in the plotter
-        actors = getattr(self.plotter.renderer, 'actors', {})
-        if hasattr(actors, 'values'):
-            for actor in actors.values():
-                try:
-                    actor.GetProperty().SetPointSize(size)
-                    #print(f"[DEBUG] Updated actor {actor} point size to: {size}")
-                except Exception as e:
-                    print(f"[ERROR] Failed to set point size for actor {actor}: {e}")
+        if actor is not None:
+            try:
+                actor.GetProperty().SetPointSize(size)
+                print(f"[DEBUG] Updated actor id={id(actor)} point size to: {size}")
+            except Exception as e:
+                print(f"[ERROR] Failed to set point size for actor {actor}: {e}")
         else:
-            print("[WARN] No actors found in plotter renderer to update point size.")
+            # Fallback: update all actors (legacy behavior, should be avoided)
+            actors = getattr(self.plotter.renderer, 'actors', {})
+            if hasattr(actors, 'values'):
+                for a in actors.values():
+                    try:
+                        a.GetProperty().SetPointSize(size)
+                        print(f"[DEBUG] Updated actor id={id(a)} point size to: {size}")
+                    except Exception as e:
+                        print(f"[ERROR] Failed to set point size for actor {a}: {e}")
+            else:
+                print("[WARN] No actors found in plotter renderer to update point size.")
         self.plotter.update()
     def set_theme(self, theme):
         """Set plotter background and default colormap based on theme."""
@@ -78,8 +85,8 @@ class PointCloudViewer(QWidget):
         self._colormap = "viridis"
         self._point_size = 3
 
-    def display_point_cloud(self, points, scalars=None, cmap=None, return_actor=False):
-        print(f"[DEBUG] display_point_cloud called: points.shape={getattr(points, 'shape', None)}, return_actor={return_actor}")
+    def display_point_cloud(self, points, scalars=None, cmap=None, return_actor=False, show_scalar_bar=False):
+        print(f"[DEBUG] display_point_cloud called: points.shape={getattr(points, 'shape', None)}, return_actor={return_actor}, show_scalar_bar={show_scalar_bar}")
         scalar_bar_args = {}
         # Set scalar bar text color based on theme
         if hasattr(self, '_theme') and self._theme == "Dark":
@@ -96,7 +103,8 @@ class PointCloudViewer(QWidget):
                 cmap=used_cmap,
                 render_points_as_spheres=True,
                 point_size=point_size,
-                scalar_bar_args=scalar_bar_args
+                scalar_bar_args=scalar_bar_args,
+                show_scalar_bar=show_scalar_bar
             )
         else:
             actor = self.plotter.add_points(points, color="#3daee9", render_points_as_spheres=True, point_size=point_size)

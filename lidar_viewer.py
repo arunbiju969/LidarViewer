@@ -19,15 +19,68 @@ from layers.layer_db import save_layer_settings, load_layer_settings, generate_l
 
 print("[INFO] Starting lidar_viewer.py")
 class MainWindow(QMainWindow):
+    def plot_all_layers(self):
+        """
+        Central function to clear and redraw all visible layers in the plotter.
+        Handles all point plotting, coloring, and point size updates.
+        """
+        print("[PLOTTER] plot_all_layers: clearing plotter and redrawing all visible layers")
+        if hasattr(self.viewer, 'plotter'):
+            self.viewer.plotter.clear()
+        from fileio.las_loader import get_normalized_scalars
+        for uuid, layer in self._layers.items():
+            if layer['visible']:
+                settings = load_layer_settings(uuid)
+                las = layer.get('las', None)
+                dim_name = settings.get('dimension') if settings else None
+                colormap = settings.get('colormap') if settings else None
+                # Handle custom colormap
+                if colormap == "Custom":
+                    try:
+                        from matplotlib.colors import LinearSegmentedColormap
+                        color_start = settings.get('color_start', '#0000ff') or '#0000ff'
+                        color_mid = settings.get('color_mid', '#00ff00') or '#00ff00'
+                        color_end = settings.get('color_end', '#ff0000') or '#ff0000'
+                        custom_cmap = LinearSegmentedColormap.from_list(
+                            'custom_cmap', [color_start, color_mid, color_end]
+                        )
+                        colormap = custom_cmap
+                    except Exception as e:
+                        print(f"[WARN] Failed to create custom colormap, falling back to 'viridis': {e}")
+                        colormap = 'viridis'
+                point_size = settings.get('point_size') if settings else None
+                scalars = None
+                if las is not None and dim_name and dim_name in las:
+                    scalars = get_normalized_scalars(las, dim_name)
+                actor = self.viewer.display_point_cloud(
+                    layer['points'],
+                    scalars=scalars,
+                    cmap=colormap,
+                    return_actor=True,
+                    show_scalar_bar=False
+                )
+                self._layers[uuid]['actor'] = actor
+                if point_size is not None and hasattr(self.viewer, 'set_point_size'):
+                    self.viewer.set_point_size(point_size, actor=actor)
+            else:
+                self._layers[uuid]['actor'] = None
+        # Remove scalar bar/legend if present
+        if hasattr(self.viewer, 'plotter'):
+            try:
+                self.viewer.plotter.remove_scalar_bar()
+            except Exception as e:
+                print(f"[WARN] Could not remove scalar bar: {e}")
+            self.viewer.plotter.update()
+        actors_present = {uuid: l['actor'] is not None for uuid, l in self._layers.items()}
+        print(f"[PLOTTER] Actors present after plot_all_layers: {actors_present}")
     def _on_point_size_changed(self, value):
         print(f"[DEBUG] Point size changed to: {value}")
-        self.viewer.set_point_size(value)
-        # Always update plotter in real time
-        self._on_color_by_changed()
         # Always save to DB
         if hasattr(self, '_current_layer_id') and self._current_layer_id and hasattr(self, '_current_file_path') and self._current_file_path:
             print(f"[DB] Saving sidebar settings to DB for layer {self._current_layer_id}: {self._get_sidebar_settings()}")
             save_layer_settings(self._current_layer_id, self._current_file_path, self._get_sidebar_settings())
+        # Always update plotter in real time
+        self.plot_all_layers()
     def _on_projection_changed(self, index=None):
         # 0: Parallel, 1: Perspective
         if hasattr(self.viewer, 'plotter') and hasattr(self.viewer.plotter, 'camera') and self.viewer.plotter.camera is not None:
@@ -72,59 +125,12 @@ class MainWindow(QMainWindow):
             print("[DEBUG] Colormap already 'Custom', updating coloring now")
             self._on_color_by_changed()
     def _on_color_by_changed(self, index=None):
-        import matplotlib.colors as mcolors
-        import matplotlib.pyplot as plt
-        from fileio.las_loader import get_normalized_scalars
-        # Get the selected dimension name
-        dim_name = self.sidebar.color_controls.dimension_box.currentText()
-        colormap = self.sidebar.color_controls.colormap_box.currentText()
-        # Defensive: skip if no file loaded or invalid selection
-        if not hasattr(self, '_las') or dim_name not in self._las:
-            self.viewer._colormap = colormap
-            self.viewer.display_point_cloud(self._points)
-            return
-        # Always write to DB, but only update plotter if current layer is visible
-        is_visible = (
-            hasattr(self, '_current_layer_id') and
-            self._current_layer_id in self._layers and
-            self._layers[self._current_layer_id].get('visible', False)
-        )
-        if not is_visible:
-            print("[DEBUG] Current layer is not visible; skipping plotter update but writing to DB.")
-        else:
-            # Use loader utility to get normalized scalars
-            norm_scalars = get_normalized_scalars(self._las, dim_name)
-            # Handle custom colormap
-            if colormap == "Custom":
-                # Get user-selected colors directly from the pickers for immediate update
-                start = self.sidebar.color_controls.color_start
-                mid = self.sidebar.color_controls.color_mid
-                end = self.sidebar.color_controls.color_end
-                print(f"[DEBUG] Custom color changed: start={start}, mid={mid}, end={end}")
-                # Create a custom colormap
-                cmap = mcolors.LinearSegmentedColormap.from_list(
-                    "custom_gradient", [start, mid, end]
-                )
-                self.viewer.display_point_cloud(self._points, scalars=norm_scalars, cmap=cmap)
-            else:
-                self.viewer._colormap = colormap
-                self.viewer.display_point_cloud(self._points, scalars=norm_scalars)
-            # Always set the point size after drawing
-            point_size = self.sidebar.point_size_controls.get_point_size() if hasattr(self.sidebar.point_size_controls, 'get_point_size') else None
-            if point_size is not None:
-                print(f"[DEBUG] Setting plotter point size to: {point_size}")
-                self.viewer.set_point_size(point_size)
-        # Save current sidebar settings to DB for this layer (always)
+        # Always save to DB
         if hasattr(self, '_current_layer_id') and self._current_layer_id and hasattr(self, '_current_file_path') and self._current_file_path:
             print(f"[DB] Saving sidebar settings to DB for layer {self._current_layer_id}: {self._get_sidebar_settings()}")
             save_layer_settings(self._current_layer_id, self._current_file_path, self._get_sidebar_settings())
-            # Reload settings from DB and apply
-            settings = load_layer_settings(self._current_layer_id)
-            print(f"[DB] Reloaded sidebar settings from DB after color/colormap change for layer {self._current_layer_id}: {settings}")
-            if settings:
-                print(f"[PLOTTER] Redrawing plotter using DB values after color/colormap change for layer {self._current_layer_id}")
-                self._set_sidebar_settings(settings)
-                # Redraw plotter using DB settings (avoid infinite loop by not calling _on_color_by_changed again)
+        # Always update plotter in real time
+        self.plot_all_layers()
     SETTINGS_FILE = "settings.json"
 
 
@@ -338,8 +344,8 @@ class MainWindow(QMainWindow):
             if settings:
                 print(f"[INFO] Loaded sidebar settings from DB for layer {self._current_layer_id}")
                 self._set_sidebar_settings(settings)
-            # Display all visible layers
-            self._update_all_layers_in_viewer()
+            # Display all visible layers using the unified plotter
+            self.plot_all_layers()
             print(f"[INFO] Point cloud displayed for file: {file_path}")
             self._on_projection_changed()
             self.viewer.plotter.add_axes()
@@ -352,7 +358,7 @@ class MainWindow(QMainWindow):
             self.sidebar.color_controls.colormap_box.currentIndexChanged.connect(self._on_color_by_changed)
             if self._metadata_action:
                 self._metadata_action.setEnabled(True)
-            self._on_color_by_changed()
+            self.plot_all_layers()
             save_layer_settings(self._current_layer_id, self._current_file_path, self._get_sidebar_settings())
             # Update the layer manager with all layers, checked state reflects visibility
             all_layers = [(uuid, l['file_path']) for uuid, l in self._layers.items()]
@@ -366,46 +372,9 @@ class MainWindow(QMainWindow):
             QApplication.processEvents()
 
     def _update_all_layers_in_viewer(self):
-        print(f"[DEBUG] _update_all_layers_in_viewer: id(self)={id(self)}")
-        # Remove all actors
-        if hasattr(self.viewer, 'plotter'):
-            print("[DEBUG] _update_all_layers_in_viewer: clearing plotter")
-            self.viewer.plotter.clear()
-        # Add all visible layers
-
-        from fileio.las_loader import get_normalized_scalars
-        for uuid, layer in self._layers.items():
-            if layer['visible']:
-                print("[DEBUG] _update_all_layers_in_viewer: adding visible layers")
-                print(f"[DEBUG] Layer {uuid}: visible={layer['visible']}")
-                print(f"[DEBUG] Calling display_point_cloud for layer {uuid}")
-                settings = load_layer_settings(uuid)
-                if settings:
-                    # Use per-layer LAS object
-                    las = layer.get('las', None)
-                    dim_name = settings.get('dimension')
-                    colormap = settings.get('colormap')
-                    point_size = settings.get('point_size')
-                    scalars = None
-                    if las is not None and dim_name and dim_name in las:
-                        scalars = get_normalized_scalars(las, dim_name)
-                    actor = self.viewer.display_point_cloud(
-                        layer['points'],
-                        scalars=scalars,
-                        cmap=colormap,
-                        return_actor=True
-                    )
-                    if point_size is not None and hasattr(self.viewer, 'set_point_size'):
-                        self.viewer.set_point_size(point_size)
-                else:
-                    actor = self.viewer.display_point_cloud(layer['points'], return_actor=True)
-                self._layers[uuid]['actor'] = actor
-            else:
-                self._layers[uuid]['actor'] = None
-
-        # Debug print: list all actors present
-        actors_present = {uuid: l['actor'] is not None for uuid, l in self._layers.items()}
-        print(f"[DEBUG] Actors present after update: {actors_present}")
+        # Deprecated: replaced by plot_all_layers()
+        print("[DEBUG] _update_all_layers_in_viewer is deprecated. Use plot_all_layers instead.")
+        self.plot_all_layers()
 
     def _on_layer_toggled(self, uuid, checked):
         print(f"[DEBUG] _on_layer_toggled: id(self)={id(self)}, uuid={uuid}, checked={checked}")
@@ -456,24 +425,48 @@ class MainWindow(QMainWindow):
         print(f"[DB->SIDEBAR] Applying settings from DB to sidebar: {settings}")
         color_controls = self.sidebar.color_controls
         point_size_controls = self.sidebar.point_size_controls
-        if 'dimension' in settings:
-            idx = color_controls.dimension_box.findText(settings['dimension'])
-            if idx != -1:
-                color_controls.dimension_box.setCurrentIndex(idx)
-        if 'colormap' in settings:
-            idx = color_controls.colormap_box.findText(settings['colormap'])
-            if idx != -1:
-                color_controls.colormap_box.setCurrentIndex(idx)
-        if 'color_start' in settings and hasattr(color_controls, 'color_start'):
-            color_controls.color_start = settings['color_start']
-        if 'color_mid' in settings and hasattr(color_controls, 'color_mid'):
-            color_controls.color_mid = settings['color_mid']
-        if 'color_end' in settings and hasattr(color_controls, 'color_end'):
-            color_controls.color_end = settings['color_end']
-        if 'point_size' in settings and hasattr(point_size_controls, 'set_point_size'):
-            point_size_controls.set_point_size(settings['point_size'])
-        # Plotter update intentionally not triggered here to avoid infinite update loop
-        print("[DEBUG] Sidebar settings applied from DB (plotter update not triggered here).")
+        # Block signals for all widgets while updating
+        widgets = [
+            color_controls.dimension_box,
+            color_controls.colormap_box,
+            getattr(point_size_controls, 'slider', None),
+        ]
+        for w in widgets:
+            if w is not None:
+                w.blockSignals(True)
+        try:
+            if 'dimension' in settings:
+                idx = color_controls.dimension_box.findText(settings['dimension'])
+                if idx != -1:
+                    color_controls.dimension_box.setCurrentIndex(idx)
+            if 'colormap' in settings:
+                idx = color_controls.colormap_box.findText(settings['colormap'])
+                if idx != -1:
+                    color_controls.colormap_box.setCurrentIndex(idx)
+            if 'color_start' in settings and hasattr(color_controls, 'color_start'):
+                color_controls.color_start = settings['color_start']
+            if 'color_mid' in settings and hasattr(color_controls, 'color_mid'):
+                color_controls.color_mid = settings['color_mid']
+            if 'color_end' in settings and hasattr(color_controls, 'color_end'):
+                color_controls.color_end = settings['color_end']
+            if 'point_size' in settings and hasattr(point_size_controls, 'set_point_size'):
+                point_size_controls.set_point_size(settings['point_size'])
+        finally:
+            for w in widgets:
+                if w is not None:
+                    w.blockSignals(False)
+
+        # After applying sidebar settings, update the plotter's actor point size and force redraw
+        point_size = settings.get('point_size', None)
+        actor = None
+        if hasattr(self, '_current_layer_id') and self._current_layer_id in self._layers:
+            actor = self._layers[self._current_layer_id].get('actor', None)
+        if point_size is not None and actor is not None and hasattr(self.viewer, 'set_point_size'):
+            print(f"[DEBUG] Forcing plotter to update actor id={id(actor)} to point size: {point_size} after DB->sidebar sync")
+            self.viewer.set_point_size(point_size, actor=actor)
+            if hasattr(self.viewer, 'plotter'):
+                self.viewer.plotter.update()
+        print("[DEBUG] Sidebar settings applied from DB and plotter updated.")
 
 
 
