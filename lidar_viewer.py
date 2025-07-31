@@ -291,6 +291,52 @@ class MainWindow(QMainWindow):
 
     def _on_layer_removed_debug(self, uuid):
         print(f"[DEBUG] layer_removed signal received from LayerManagerWidget (Remove button pressed), uuid={uuid}")
+        if uuid not in self.layer_manager.layers:
+            print(f"[ERROR] _on_layer_removed_debug: UUID {uuid} not found in layers!")
+            return
+        # Remove the actor from the viewer if present
+        actor = self.layer_manager.layers[uuid].get('actor', None)
+        if actor and hasattr(self.viewer, 'plotter'):
+            try:
+                self.viewer.plotter.remove_actor(actor)
+            except Exception as e:
+                print(f"[WARN] Could not remove actor for layer {uuid}: {e}")
+        # Remove the layer from LayerManager
+        del self.layer_manager.layers[uuid]
+        # If the removed layer was current, update current selection
+        if self.layer_manager.get_current_layer_id() == uuid:
+            remaining = list(self.layer_manager.layers.keys())
+            if remaining:
+                new_current = remaining[0]
+                self.layer_manager.set_current_layer(new_current)
+                # Update sidebar settings for new current layer
+                settings = load_layer_settings(new_current)
+                if settings:
+                    self.sidebar.set_sidebar_settings(settings)
+                # Show bounding box for new current layer
+                self._show_bounding_box_for_current_layer()
+            else:
+                self.layer_manager.set_current_layer(None)
+                # Clear viewer and sidebar info
+                if hasattr(self.viewer, 'clear'):
+                    self.viewer.clear()
+                self.sidebar.set_status("No layers loaded.")
+                self.sidebar.update_file_info("", 0)
+                self.sidebar.update_dimensions([])
+                # Remove bounding box if present
+                if hasattr(self, '_bbox_actor') and self._bbox_actor is not None:
+                    try:
+                        self.viewer.plotter.remove_actor(self._bbox_actor)
+                    except Exception:
+                        pass
+                    self._bbox_actor = None
+        # Update the sidebar's layer list
+        all_layers = [(u, l['file_path']) for u, l in self.layer_manager.layers.items()]
+        checked_uuids = set(u for u, l in self.layer_manager.layers.items() if l['visible'])
+        self.sidebar.update_layers(all_layers, current_uuid=self.layer_manager.get_current_layer_id(), checked_uuids=checked_uuids)
+        # Redraw all layers
+        self.plot_all_layers()
+        print(f"[INFO] Removed layer: {uuid}")
 
 
 
