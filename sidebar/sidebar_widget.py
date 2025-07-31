@@ -5,6 +5,50 @@ from PySide6.QtCore import Qt
 from .layer_manager_widget import LayerManagerWidget
 
 class SidebarWidget(QWidget):
+    def get_sidebar_settings(self):
+        color_controls = self.color_controls
+        point_size_controls = self.point_size_controls
+        return {
+            'dimension': color_controls.dimension_box.currentText(),
+            'colormap': color_controls.colormap_box.currentText(),
+            'color_start': getattr(color_controls, 'color_start', None),
+            'color_mid': getattr(color_controls, 'color_mid', None),
+            'color_end': getattr(color_controls, 'color_end', None),
+            'point_size': point_size_controls.get_point_size() if hasattr(point_size_controls, 'get_point_size') else None,
+        }
+
+    def set_sidebar_settings(self, settings):
+        color_controls = self.color_controls
+        point_size_controls = self.point_size_controls
+        widgets = [
+            color_controls.dimension_box,
+            color_controls.colormap_box,
+            getattr(point_size_controls, 'slider', None),
+        ]
+        for w in widgets:
+            if w is not None:
+                w.blockSignals(True)
+        try:
+            if 'dimension' in settings:
+                idx = color_controls.dimension_box.findText(settings['dimension'])
+                if idx != -1:
+                    color_controls.dimension_box.setCurrentIndex(idx)
+            if 'colormap' in settings:
+                idx = color_controls.colormap_box.findText(settings['colormap'])
+                if idx != -1:
+                    color_controls.colormap_box.setCurrentIndex(idx)
+            if 'color_start' in settings and hasattr(color_controls, 'color_start'):
+                color_controls.color_start = settings['color_start']
+            if 'color_mid' in settings and hasattr(color_controls, 'color_mid'):
+                color_controls.color_mid = settings['color_mid']
+            if 'color_end' in settings and hasattr(color_controls, 'color_end'):
+                color_controls.color_end = settings['color_end']
+            if 'point_size' in settings and hasattr(point_size_controls, 'set_point_size'):
+                point_size_controls.set_point_size(settings['point_size'])
+        finally:
+            for w in widgets:
+                if w is not None:
+                    w.blockSignals(False)
     def set_status(self, text):
         print(f"[DEBUG] set_status called with text: {text}")
         self.status_label.setText(text)
