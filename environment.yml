@@ -1,0 +1,15 @@
+name: lidarviewer
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - numpy
+  - laspy
+  - pyvista
+  - pyvistaqt
+  - pyside6
+  - matplotlib
+  - scipy
+  - pip
+  - pdal

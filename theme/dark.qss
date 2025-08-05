@@ -12,10 +12,7 @@ QFrame#sidebar {
 QPushButton, QComboBox, QToolBar, QMenuBar, QMenu, QGroupBox, QLineEdit, QAbstractItemView, QCheckBox, QRadioButton {
     background-color: #2e2e2e;
     color: #d3dae3;
-    border: 1px solid #3daee9;
-}
-QPushButton:hover, QComboBox:hover {
-    background-color: #3a3f44;
+    border: none; /* Removed the border */
 }
 QPushButton:pressed {
     background-color: #3daee9;

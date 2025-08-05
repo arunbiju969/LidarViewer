@@ -1,5 +1,6 @@
 import os
 import sys
+import numpy as np
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QFileDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QGroupBox, QFormLayout, QComboBox
 )
@@ -75,6 +76,14 @@ class MainWindow(QMainWindow):
 
     def _redraw_current_layer(self):
         self.layer_manager.redraw_current_layer(self.viewer)
+    
+    def _show_point_picking_status(self, enabled):
+        """Show or hide the point picking status indicator"""
+        if enabled:
+            self.point_picking_status_label.show()
+        else:
+            self.point_picking_status_label.hide()
+    
     def _on_projection_changed(self, index=None):
         # 0: Parallel, 1: Perspective
         if hasattr(self.viewer, 'plotter') and hasattr(self.viewer.plotter, 'camera') and self.viewer.plotter.camera is not None:
@@ -164,6 +173,21 @@ class MainWindow(QMainWindow):
         # Integrate point picking (enabled by default)
         from point_picking.point_picker import PointPicker
         self.point_picker = PointPicker(self.viewer)
+        
+        # Initialize height profile components
+        from profile_line.line_drawer import LineDrawer
+        from profile_line.profile_calculator import ProfileCalculator
+        from profile_line.profile_viewer import ProfileViewer
+        
+        self.line_drawer = LineDrawer(self.viewer)
+        self.profile_calculator = ProfileCalculator()
+        self.profile_viewer = ProfileViewer(self)
+        
+        # Connect profile viewer to calculator for recalculation
+        self.profile_viewer.set_profile_calculator(self.profile_calculator)
+        
+        # Set callback for line completion
+        self.line_drawer.on_line_completed_callback = self._on_profile_line_completed
         # self._current_file_path and self._current_layer_id are now managed by LayerManager
         self._metadata_action = None    # Reference to metadata menu action
         from viewer.view_toolbar import ViewToolbar
@@ -171,10 +195,52 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.sidebar)
         # Create a vertical layout for toolbar + viewer
         viewer_vlayout = QVBoxLayout()
-        self.view_toolbar = ViewToolbar(self.viewer, parent=self)
+        self.view_toolbar = ViewToolbar(self.viewer, main_window=self, parent=self)
         # Add toolbar with alignment left, no stretch
         viewer_vlayout.addWidget(self.view_toolbar, alignment=Qt.AlignLeft)
-        viewer_vlayout.addWidget(self.viewer, stretch=1)
+        
+        # Create a container for the viewer with status overlay
+        viewer_container = QWidget()
+        viewer_container_layout = QVBoxLayout(viewer_container)
+        viewer_container_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Create status label for point picking (initially hidden)
+        from PySide6.QtWidgets import QLabel
+        self.point_picking_status_label = QLabel("Point Picking Enabled")
+        self.point_picking_status_label.setStyleSheet("""
+            QLabel {
+                background-color: rgba(61, 174, 233, 200);
+                color: white;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+                margin: 10px;
+            }
+        """)
+        self.point_picking_status_label.setAlignment(Qt.AlignCenter)
+        self.point_picking_status_label.hide()
+        
+        # Create status label for height profile (initially hidden)
+        self.height_profile_status_label = QLabel("Height Profile Mode: Click two points")
+        self.height_profile_status_label.setStyleSheet("""
+            QLabel {
+                background-color: rgba(233, 174, 61, 200);
+                color: white;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+                margin: 10px;
+            }
+        """)
+        self.height_profile_status_label.setAlignment(Qt.AlignCenter)
+        self.height_profile_status_label.hide()
+        
+        # Add status labels and viewer to container
+        viewer_container_layout.addWidget(self.point_picking_status_label)
+        viewer_container_layout.addWidget(self.height_profile_status_label)
+        viewer_container_layout.addWidget(self.viewer, stretch=1)
+        
+        viewer_vlayout.addWidget(viewer_container, stretch=1)
         main_layout.addLayout(viewer_vlayout, stretch=1)
         container = QWidget()
         container.setLayout(main_layout)
@@ -230,6 +296,8 @@ class MainWindow(QMainWindow):
             self.layer_manager.set_current_layer(generate_layer_id(), file_path=default_file)
             if self._metadata_action:
                 self._metadata_action.setEnabled(True)
+            if hasattr(self, '_export_layer_action'):
+                self._export_layer_action.setEnabled(True)
             self._on_projection_changed()
             self._on_color_by_changed()
         else:
@@ -238,6 +306,8 @@ class MainWindow(QMainWindow):
             self.layer_manager.set_current_layer(None)
             if self._metadata_action:
                 self._metadata_action.setEnabled(False)
+            if hasattr(self, '_export_layer_action'):
+                self._export_layer_action.setEnabled(False)
     
     def _on_layer_selected(self, uuid):
         print(f"[DEBUG] _on_layer_selected called with uuid={uuid}")
@@ -403,6 +473,18 @@ class MainWindow(QMainWindow):
         file_menu = menubar.addMenu("File")
         open_action = file_menu.addAction("Open LAS/LAZ File...")
         open_action.triggered.connect(self.open_file)
+        
+        file_menu.addSeparator()
+        
+        # Export submenu
+        export_menu = file_menu.addMenu("Export")
+        export_layer_action = export_menu.addAction("Export Current Layer as LAZ...")
+        export_layer_action.triggered.connect(self._export_current_layer)
+        export_layer_action.setEnabled(False)
+        self._export_layer_action = export_layer_action
+        
+        file_menu.addSeparator()
+        
         # Show LAS Metadata action
         metadata_action = file_menu.addAction("Show LAS Metadata")
         metadata_action.setEnabled(False)
@@ -474,6 +556,8 @@ class MainWindow(QMainWindow):
             self.sidebar.color_controls.colormap_box.currentIndexChanged.connect(self._on_color_by_changed)
             if self._metadata_action:
                 self._metadata_action.setEnabled(True)
+            if hasattr(self, '_export_layer_action'):
+                self._export_layer_action.setEnabled(True)
             self.plot_all_layers()
             save_layer_settings(new_layer_id, file_path, self.sidebar.get_sidebar_settings())
             # Update the layer manager with all layers, checked state reflects visibility
@@ -534,6 +618,251 @@ class MainWindow(QMainWindow):
                 print(f"[ERROR] Exception in _on_layer_toggled: {e}")
         else:
             print(f"[ERROR] UUID {uuid} not found in self.layer_manager.layers!")
+
+    def _toggle_bounding_box_for_current_layer(self, enabled):
+        """Show or hide the bounding box for the current layer."""
+        if enabled:
+            self._show_bounding_box_for_current_layer()
+        else:
+            # Remove previous bounding box actor if present
+            if hasattr(self, '_bbox_actor') and self._bbox_actor is not None:
+                try:
+                    self.viewer.plotter.remove_actor(self._bbox_actor)
+                except Exception:
+                    pass
+                self._bbox_actor = None
+            if hasattr(self.viewer, 'plotter'):
+                self.viewer.plotter.update()
+
+    def _toggle_height_profile_mode(self, enabled):
+        """Enable/disable height profile drawing mode"""
+        if enabled:
+            self.line_drawer.start_line_drawing()
+            self._show_height_profile_status(True)
+            print("[INFO] Height profile mode enabled. Click two points to draw a line.")
+        else:
+            # When disabling, clear any existing line and fully stop the mode
+            self.line_drawer.stop_line_drawing()
+            # Also clear any existing completed line
+            if hasattr(self.line_drawer, 'line_actor') and self.line_drawer.line_actor:
+                self.line_drawer.clear_completed_line()
+            self._show_height_profile_status(False)
+            print("[INFO] Height profile mode disabled.")
+
+    def _show_height_profile_status(self, enabled):
+        """Show or hide height profile status indicator"""
+        if enabled:
+            self.height_profile_status_label.show()
+        else:
+            self.height_profile_status_label.hide()
+
+    def _on_profile_line_completed(self, start_point, end_point):
+        """Called when user completes drawing a line"""
+        print(f"[INFO] Profile line completed: {start_point} -> {end_point}")
+        
+        # Get current layer points
+        current_layer_id = self.layer_manager.get_current_layer_id()
+        if not current_layer_id or current_layer_id not in self.layer_manager.layers:
+            print("[WARN] No current layer available for profile calculation")
+            return
+            
+        layer = self.layer_manager.layers[current_layer_id]
+        points = layer.get('points', None)
+        
+        if points is None or points.shape[0] == 0:
+            print("[WARN] No points available in current layer")
+            return
+        
+        # Calculate profile
+        try:
+            print("[INFO] Starting height profile calculation...")
+            profile_data = self.profile_calculator.calculate_profile(
+                points, start_point, end_point, num_samples=100, tolerance=1.0
+            )
+            
+            # Display profile in viewer
+            self.profile_viewer.display_profile(profile_data, points, start_point, end_point)
+            self.profile_viewer.show()
+            self.profile_viewer.raise_()
+            self.profile_viewer.activateWindow()
+            
+            # Display results summary in console
+            self._display_profile_results(profile_data)
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to calculate profile: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Disable height profile mode but KEEP the line visible
+        # Don't change the button state here - let the user manually cancel if they want
+        self.line_drawer.is_drawing = False
+        self.line_drawer._disable_picking()
+        self._show_height_profile_status(False)
+        print("[INFO] Line drawing completed. Profile calculated!")
+        
+    def _import_cross_section_layer(self, temp_file_path, point_count):
+        """Import cross-section as a new layer"""
+        try:
+            from fileio.las_loader import load_point_cloud_data
+            
+            print(f"[INFO] Importing cross-section layer from: {temp_file_path}")
+            
+            # Load the temporary LAZ file
+            data = load_point_cloud_data(temp_file_path)
+            points = data["points"]
+            las = data["las"]
+            
+            # Generate new layer ID
+            uuid = generate_layer_id()
+            
+            # Create descriptive name
+            import os
+            base_name = "CrossSection"
+            if hasattr(self, 'layer_manager'):
+                current_layer_id = self.layer_manager.get_current_layer_id()
+                if current_layer_id and current_layer_id in self.layer_manager.layers:
+                    original_file = self.layer_manager.layers[current_layer_id].get('file_path', '')
+                    if original_file:
+                        base_name = f"CrossSection_{os.path.splitext(os.path.basename(original_file))[0]}"
+            
+            layer_name = f"{base_name}_{point_count}pts"
+            
+            # Add layer to manager
+            self.layer_manager.add_layer(uuid, layer_name, points, las, visible=True, actor=None)
+            
+            # Save default settings for new layer
+            default_settings = self.sidebar.get_sidebar_settings()
+            # Set a different color for cross-section
+            default_settings['colormap'] = 'plasma'  # Different colormap
+            save_layer_settings(uuid, layer_name, default_settings)
+            
+            # Update display
+            self.plot_all_layers()
+            
+            # Update sidebar
+            all_layers = [(u, l['file_path']) for u, l in self.layer_manager.layers.items()]
+            checked_uuids = set(u for u, l in self.layer_manager.layers.items() if l['visible'])
+            self.sidebar.update_layers(all_layers, current_uuid=uuid, checked_uuids=checked_uuids)
+            
+            # Update sidebar info
+            self.sidebar.set_status(f"Cross-section layer created: {point_count} points")
+            self.sidebar.update_file_info(layer_name, point_count)
+            self.sidebar.update_dimensions(data["dims"])
+            
+            # Apply settings to new layer
+            self.sidebar.set_sidebar_settings(default_settings)
+            
+            print(f"[INFO] Cross-section layer imported successfully: {layer_name}")
+            
+            # Keep temporary file for debugging - don't clean up
+            print(f"[INFO] Temporary file kept for inspection: {temp_file_path}")
+            # try:
+            #     os.remove(temp_file_path)
+            #     print(f"[INFO] Temporary file cleaned up: {temp_file_path}")
+            # except:
+            #     print(f"[WARN] Could not clean up temporary file: {temp_file_path}")
+                
+        except Exception as e:
+            print(f"[ERROR] Failed to import cross-section layer: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _export_current_layer(self):
+        """Export current layer as LAZ file"""
+        current_layer_id = self.layer_manager.get_current_layer_id()
+        if not current_layer_id or current_layer_id not in self.layer_manager.layers:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "No Layer", "No current layer available for export.")
+            return
+            
+        layer = self.layer_manager.layers[current_layer_id]
+        points = layer.get('points', None)
+        las_data = layer.get('las', None)
+        file_path = layer.get('file_path', 'unknown')
+        
+        if points is None or points.shape[0] == 0:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "No Data", "Current layer has no points to export.")
+            return
+        
+        # Get output file path
+        from PySide6.QtWidgets import QFileDialog
+        import os
+        
+        default_name = f"exported_{os.path.splitext(os.path.basename(file_path))[0]}.laz"
+        output_path, _ = QFileDialog.getSaveFileName(
+            self, "Export Layer as LAZ", default_name, 
+            "LAZ Files (*.laz);;LAS Files (*.las);;All Files (*)"
+        )
+        
+        if not output_path:
+            return
+            
+        try:
+            from fileio.pdal_exporter import export_points_to_laz
+            
+            # Create all point indices for full export
+            point_indices = np.arange(len(points))
+            
+            # Reconstruct the original data structure for PDAL
+            original_las_data = {
+                'las': las_data,
+                'points': points,
+                'dims': list(las_data.keys()) if las_data else [],
+                'file_path': file_path  # Add the file path for PDAL to use
+            }
+            
+            success = export_points_to_laz(
+                points, output_path, original_las_data, point_indices, preserve_all_dimensions=True
+            )
+            
+            if success:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.information(self, "Export Successful", 
+                                      f"Layer exported successfully:\n{output_path}\n\n"
+                                      f"Points: {len(points):,}")
+                print(f"[INFO] Layer exported: {output_path} ({len(points)} points)")
+            else:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.critical(self, "Export Failed", 
+                                   f"Failed to export layer to:\n{output_path}")
+                
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Export Error", 
+                               f"Error during export:\n{str(e)}")
+            print(f"[ERROR] Export failed: {e}")
+            import traceback
+            traceback.print_exc()
+        
+    def _display_profile_results(self, profile_data):
+        """Display profile calculation results summary in console"""
+        summary = profile_data.get('summary', {})
+        
+        print(f"[INFO] Profile Summary:")
+        print(f"  - Total length: {profile_data['total_length']:.2f} m")
+        print(f"  - Valid samples: {summary.get('valid_samples', 0)}")
+        print(f"  - Coverage: {summary.get('coverage_percentage', 0):.1f}%")
+        print(f"  - Elevation range: {summary.get('elevation_range', 0):.2f} m")
+        print(f"  - Min elevation: {summary.get('min_elevation', 0):.2f} m")
+        print(f"  - Max elevation: {summary.get('max_elevation', 0):.2f} m")
+        print(f"  - Mean elevation: {summary.get('mean_elevation', 0):.2f} m")
+        print(f"  - Total elevation change: {summary.get('total_elevation_change', 0):.2f} m")
+        
+        # Print the first few data points for verification
+        print(f"[INFO] First 5 profile points:")
+        for i in range(min(5, len(profile_data['distances']))):
+            dist = profile_data['distances'][i]
+            mean_h = profile_data['mean_heights'][i]
+            min_h = profile_data['min_heights'][i]
+            max_h = profile_data['max_heights'][i]
+            count = profile_data['point_counts'][i]
+            
+            if not np.isnan(mean_h):
+                print(f"  {dist:6.1f}m: {mean_h:7.2f}m (min: {min_h:7.2f}, max: {max_h:7.2f}, pts: {count})")
+            else:
+                print(f"  {dist:6.1f}m: No data")
 
 
 

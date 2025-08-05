@@ -14,15 +14,40 @@ class PointPicker:
     def __init__(self, viewer):
         self.viewer = viewer
         self.picked_points = []  # Store picked points (coords, index)
-        self._picker_callback = self.viewer.plotter.enable_point_picking(
-            callback=self._on_point_picked,
-            left_clicking=True,
-            show_message=True,
-            use_picker=True
-        )
-        self._enabled = True  # Enable point picking by default
+        self._enabled = False  # Disable point picking by default
         self._picker_callback = None
 
+    def set_enabled(self, enabled):
+        """Enable or disable point picking"""
+        if enabled and not self._enabled:
+            # First disable any existing picking to avoid PyVistaPickingError
+            try:
+                self.viewer.plotter.disable_picking()
+            except Exception:
+                pass  # Ignore if no picking was active
+            
+            # Enable point picking
+            self._picker_callback = self.viewer.plotter.enable_point_picking(
+                callback=self._on_point_picked,
+                left_clicking=True,
+                show_message=True,
+                use_picker=True
+            )
+            self._enabled = True
+            print("[INFO] Point picking enabled.")
+        elif not enabled and self._enabled:
+            # Disable point picking
+            try:
+                self.viewer.plotter.disable_picking()
+            except Exception:
+                pass  # Ignore if picking was already disabled
+            self._picker_callback = None
+            self._enabled = False
+            print("[INFO] Point picking disabled.")
+    
+    def is_enabled(self):
+        """Check if point picking is currently enabled"""
+        return self._enabled
 
     def _on_point_picked(self, picked):
         print("[DEBUG] _on_point_picked callback triggered.")
