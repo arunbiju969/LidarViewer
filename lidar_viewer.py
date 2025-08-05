@@ -755,13 +755,12 @@ class MainWindow(QMainWindow):
             
             print(f"[INFO] Cross-section layer imported successfully: {layer_name}")
             
-            # Keep temporary file for debugging - don't clean up
-            print(f"[INFO] Temporary file kept for inspection: {temp_file_path}")
-            # try:
-            #     os.remove(temp_file_path)
-            #     print(f"[INFO] Temporary file cleaned up: {temp_file_path}")
-            # except:
-            #     print(f"[WARN] Could not clean up temporary file: {temp_file_path}")
+            # Clean up temporary file
+            try:
+                os.remove(temp_file_path)
+                print(f"[INFO] Temporary file cleaned up: {temp_file_path}")
+            except:
+                print(f"[WARN] Could not clean up temporary file: {temp_file_path}")
                 
         except Exception as e:
             print(f"[ERROR] Failed to import cross-section layer: {e}")
@@ -800,21 +799,13 @@ class MainWindow(QMainWindow):
             return
             
         try:
-            from fileio.pdal_exporter import export_points_to_laz
+            from fileio.las_exporter import export_points_to_laz
             
             # Create all point indices for full export
             point_indices = np.arange(len(points))
             
-            # Reconstruct the original data structure for PDAL
-            original_las_data = {
-                'las': las_data,
-                'points': points,
-                'dims': list(las_data.keys()) if las_data else [],
-                'file_path': file_path  # Add the file path for PDAL to use
-            }
-            
             success = export_points_to_laz(
-                points, output_path, original_las_data, point_indices, preserve_all_dimensions=True
+                points, output_path, las_data, point_indices, preserve_all_dimensions=True
             )
             
             if success:

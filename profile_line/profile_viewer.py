@@ -351,9 +351,7 @@ class ProfileViewer(QDialog):
             # Get settings
             tolerance = self.tolerance_spinbox.value()
             
-            print(f"[INFO] ========== CROSS-SECTION LAYER CREATION STARTED ==========")
-            print(f"[INFO] Tolerance: {tolerance}m")
-            print(f"[INFO] Available points: {len(self.current_points):,}")
+            print(f"[INFO] Creating cross-section layer with tolerance={tolerance}")
             
             # Find all points within tolerance of the line
             cross_section_points = self._extract_cross_section_points(
@@ -365,17 +363,25 @@ class ProfileViewer(QDialog):
                                   f"No points found within {tolerance}m of the profile line.")
                 return
                 
-            print(f"[INFO] Cross-section points found: {len(cross_section_points):,}")
-            print(f"[INFO] APPROACH: Attempting ENHANCED method (with preserved attributes)")
+            # Export as temporary LAZ file
+            temp_file = self._export_cross_section_to_laz(cross_section_points)
             
-            # Create cross-section layer with preserved attributes (preferred method)
-            self._create_cross_section_layer_with_attributes(cross_section_points, tolerance)
-            
+            if temp_file:
+                # Signal parent to import the file
+                if hasattr(self.parent(), '_import_cross_section_layer'):
+                    self.parent()._import_cross_section_layer(temp_file, cross_section_points.shape[0])
+                    QMessageBox.information(self, "Layer Created", 
+                                          f"Cross-section layer created with {cross_section_points.shape[0]} points.\n"
+                                          f"Temporary file: {temp_file}")
+                else:
+                    QMessageBox.information(self, "Export Successful", 
+                                          f"Cross-section exported to: {temp_file}\n"
+                                          f"Points: {cross_section_points.shape[0]}")
+                
         except Exception as e:
             QMessageBox.critical(self, "Layer Creation Error", 
                                f"Failed to create cross-section layer:\n{str(e)}")
             print(f"[ERROR] Cross-section layer creation failed: {e}")
-            print(f"[INFO] ========== CROSS-SECTION LAYER CREATION FAILED ==========")
             import traceback
             traceback.print_exc()
     
@@ -411,203 +417,17 @@ class ProfileViewer(QDialog):
         line_points = np.array([start + t_val * (end - start) for t_val in t])
         return line_points
     
-    def _create_cross_section_layer_with_attributes(self, points, tolerance):
-        """Create cross-section layer preserving original point attributes"""
-        try:
-            from layers.layer_db import generate_layer_id
-            
-            print(f"[INFO] ENHANCED METHOD: Attempting to preserve original attributes")
-            
-            # Get the original layer data
-            if not hasattr(self.parent(), 'layer_manager'):
-                print(f"[WARN] ENHANCED METHOD: No layer_manager found, falling back to DIRECT method")
-                return self._create_cross_section_layer_direct(points, tolerance)
-                
-            current_layer_id = self.parent().layer_manager.get_current_layer_id()
-            if not current_layer_id or current_layer_id not in self.parent().layer_manager.layers:
-                print(f"[WARN] ENHANCED METHOD: No current layer found, falling back to DIRECT method")
-                return self._create_cross_section_layer_direct(points, tolerance)
-                
-            original_layer = self.parent().layer_manager.layers[current_layer_id]
-            original_points = original_layer.get('points', None)
-            original_las_data = original_layer.get('las', None)
-            
-            if original_points is None or original_las_data is None:
-                print(f"[WARN] ENHANCED METHOD: Original layer data incomplete, falling back to DIRECT method")
-                return self._create_cross_section_layer_direct(points, tolerance)
-            
-            # Find indices of cross-section points in original data
-            from fileio.pdal_exporter import find_original_point_indices
-            point_indices = find_original_point_indices(points, original_points, tolerance=1e-3)
-            
-            if len(point_indices) == 0:
-                print("[WARN] ENHANCED METHOD: No matching points found in original data, falling back to DIRECT method")
-                return self._create_cross_section_layer_direct(points, tolerance)
-            
-            print(f"[INFO] ENHANCED METHOD: Found {len(point_indices)} matching points in original data")
-            print(f"[INFO] ENHANCED METHOD: Original layer has {len(original_las_data)} attributes")
-            
-            # Extract attributes for the cross-section points
-            cross_section_las_data = {}
-            for key, values in original_las_data.items():
-                if hasattr(values, '__getitem__') and len(values) == len(original_points):
-                    cross_section_las_data[key] = values[point_indices]
-                else:
-                    # For scalar values or incompatible arrays
-                    cross_section_las_data[key] = values
-            
-            # Create layer name
-            import os
-            original_file = original_layer.get('file_path', '')
-            if original_file:
-                base_name = f"CrossSection_{os.path.splitext(os.path.basename(original_file))[0]}"
-            else:
-                base_name = "CrossSection"
-            
-            layer_name = f"{base_name}_{len(point_indices)}pts_tol{tolerance}m"
-            uuid = generate_layer_id()
-            
-            # Use the matched points (to ensure consistency)
-            matched_points = original_points[point_indices]
-            
-            # Add layer to manager
-            self.parent().layer_manager.add_layer(
-                uuid, layer_name, matched_points, cross_section_las_data, visible=True, actor=None
-            )
-            
-            # Configure layer appearance
-            default_settings = self.parent().sidebar.get_sidebar_settings()
-            default_settings['colormap'] = 'plasma'  # Different colormap for cross-section
-            
-            from layers.layer_db import save_layer_settings
-            save_layer_settings(uuid, layer_name, default_settings)
-            
-            # Update display and UI
-            self.parent().plot_all_layers()
-            
-            all_layers = [(u, l['file_path']) for u, l in self.parent().layer_manager.layers.items()]
-            checked_uuids = set(u for u, l in self.parent().layer_manager.layers.items() if l['visible'])
-            self.parent().sidebar.update_layers(all_layers, current_uuid=uuid, checked_uuids=checked_uuids)
-            
-            self.parent().sidebar.set_status(f"Cross-section layer created: {len(matched_points)} points")
-            self.parent().sidebar.update_file_info(layer_name, len(matched_points))
-            
-            # Get available dimensions from original data
-            dims = list(cross_section_las_data.keys()) if cross_section_las_data else ['X', 'Y', 'Z']
-            self.parent().sidebar.update_dimensions(dims)
-            
-            self.parent().sidebar.set_sidebar_settings(default_settings)
-            
-            # Show success message
-            QMessageBox.information(self, "Enhanced Layer Created", 
-                                  f"Cross-section layer created with preserved attributes!\n\n"
-                                  f"Name: {layer_name}\n"
-                                  f"Points: {len(matched_points):,}\n"
-                                  f"Tolerance: {tolerance}m\n"
-                                  f"Attributes: {len(dims)} dimensions")
-            
-            print(f"[INFO] ENHANCED METHOD: Successfully created layer '{layer_name}' with {len(dims)} attributes")
-            print(f"[INFO] ========== CROSS-SECTION LAYER CREATION COMPLETED (ENHANCED) ==========")
-            
-        except Exception as e:
-            print(f"[ERROR] ENHANCED METHOD: Failed to create enhanced cross-section layer: {e}")
-            print(f"[INFO] ENHANCED METHOD: Falling back to DIRECT method")
-            return self._create_cross_section_layer_direct(points, tolerance)
-
-    def _create_cross_section_layer_direct(self, points, tolerance):
-        """Create cross-section layer directly without file export"""
-        try:
-            from layers.layer_db import generate_layer_id
-            
-            print(f"[INFO] DIRECT METHOD: Creating cross-section layer directly in memory")
-            print(f"[INFO] DIRECT METHOD: Processing {len(points)} points with tolerance {tolerance}m")
-            
-            # Get original layer info for naming
-            base_name = "CrossSection"
-            if hasattr(self.parent(), 'layer_manager'):
-                current_layer_id = self.parent().layer_manager.get_current_layer_id()
-                if current_layer_id and current_layer_id in self.parent().layer_manager.layers:
-                    original_file = self.parent().layer_manager.layers[current_layer_id].get('file_path', '')
-                    if original_file:
-                        import os
-                        base_name = f"CrossSection_{os.path.splitext(os.path.basename(original_file))[0]}"
-            
-            layer_name = f"{base_name}_{len(points)}pts_tol{tolerance}m"
-            uuid = generate_layer_id()
-            
-            print(f"[INFO] DIRECT METHOD: Creating layer '{layer_name}'")
-            print(f"[INFO] DIRECT METHOD: Using minimal LAS data structure (X, Y, Z, intensity, classification)")
-            
-            # Create minimal LAS-like data structure for compatibility
-            fake_las_data = {
-                'X': points[:, 0],
-                'Y': points[:, 1], 
-                'Z': points[:, 2],
-                'intensity': np.zeros(len(points), dtype=np.uint16),  # Default intensity
-                'classification': np.full(len(points), 1, dtype=np.uint8)  # Unclassified
-            }
-            
-            # Add layer directly to manager
-            self.parent().layer_manager.add_layer(
-                uuid, layer_name, points, fake_las_data, visible=True, actor=None
-            )
-            
-            # Configure layer appearance (different color for cross-section)
-            default_settings = self.parent().sidebar.get_sidebar_settings()
-            default_settings['colormap'] = 'plasma'  # Different colormap
-            default_settings['dimension'] = 'Z'  # Color by elevation
-            
-            from layers.layer_db import save_layer_settings
-            save_layer_settings(uuid, layer_name, default_settings)
-            
-            # Update display
-            self.parent().plot_all_layers()
-            
-            # Update sidebar
-            all_layers = [(u, l['file_path']) for u, l in self.parent().layer_manager.layers.items()]
-            checked_uuids = set(u for u, l in self.parent().layer_manager.layers.items() if l['visible'])
-            self.parent().sidebar.update_layers(all_layers, current_uuid=uuid, checked_uuids=checked_uuids)
-            
-            # Update sidebar info
-            self.parent().sidebar.set_status(f"Cross-section layer created: {len(points)} points")
-            self.parent().sidebar.update_file_info(layer_name, len(points))
-            self.parent().sidebar.update_dimensions(['X', 'Y', 'Z', 'intensity', 'classification'])
-            
-            # Apply settings to new layer
-            self.parent().sidebar.set_sidebar_settings(default_settings)
-            
-            # Show success message
-            QMessageBox.information(self, "Layer Created", 
-                                  f"Cross-section layer created successfully!\n\n"
-                                  f"Name: {layer_name}\n"
-                                  f"Points: {len(points):,}\n"
-                                  f"Tolerance: {tolerance}m")
-            
-            print(f"[INFO] DIRECT METHOD: Successfully created layer '{layer_name}' with minimal attributes")
-            print(f"[INFO] ========== CROSS-SECTION LAYER CREATION COMPLETED (DIRECT) ==========")
-            
-        except Exception as e:
-            print(f"[ERROR] DIRECT METHOD: Failed to create cross-section layer: {e}")
-            print(f"[INFO] ========== CROSS-SECTION LAYER CREATION FAILED (DIRECT) ==========")
-            import traceback
-            traceback.print_exc()
-            QMessageBox.critical(self, "Layer Creation Failed", 
-                               f"Failed to create cross-section layer:\n{str(e)}")
-
     def _export_cross_section_to_laz(self, points):
-        """Export cross-section points to a temporary LAZ file with full dimension preservation using PDAL"""
-        print(f"[INFO] PDAL EXPORT METHOD: Starting PDAL-based export for {len(points)} points")
-        print(f"[INFO] PDAL EXPORT METHOD: This method exports to temporary LAZ file")
-        
+        """Export cross-section points to a temporary LAZ file with full dimension preservation"""
         try:
-            from fileio.pdal_exporter import create_temp_laz_file, find_original_point_indices
+            from fileio.las_exporter import create_temp_laz_file, find_original_point_indices
         except ImportError:
-            print(f"[WARN] PDAL EXPORT METHOD: PDAL modules not available, falling back to basic export")
+            # Fallback to basic export
             return self._basic_export_cross_section_to_laz(points)
             
         try:
             # Get original LAS data and find point indices
-            original_las_data = None
+            original_las = None
             original_points = None
             point_indices = None
             
@@ -615,105 +435,106 @@ class ProfileViewer(QDialog):
                 current_layer_id = self.parent().layer_manager.get_current_layer_id()
                 if current_layer_id and current_layer_id in self.parent().layer_manager.layers:
                     layer_data = self.parent().layer_manager.layers[current_layer_id]
-                    # Get the full original data structure
+                    original_las = layer_data.get('las', None)
                     original_points = layer_data.get('points', None)
-                    original_las_dict = layer_data.get('las', None)
-                    original_file_path = layer_data.get('file_path', None)
-                    
-                    if original_las_dict and original_points is not None:
-                        # Reconstruct the original data structure
-                        original_las_data = {
-                            'las': original_las_dict,
-                            'points': original_points,
-                            'dims': list(original_las_dict.keys()) if original_las_dict else [],
-                            'file_path': original_file_path  # Add file path for PDAL
-                        }
             
             # Find indices of cross-section points in original data
             if original_points is not None:
                 point_indices = find_original_point_indices(points, original_points)
-                print(f"[INFO] PDAL EXPORT METHOD: Found {len(point_indices)} matching point indices in original data")
+                print(f"[INFO] Found {len(point_indices)} matching point indices")
             
             # Create temporary LAZ file with full preservation
             temp_path = create_temp_laz_file(
-                points, original_las_data, point_indices, prefix="cross_section"
+                points, original_las, point_indices, prefix="cross_section"
             )
             
             if temp_path:
-                print(f"[INFO] PDAL EXPORT METHOD: Successfully exported with full dimension preservation: {temp_path}")
+                print(f"[INFO] Cross-section exported with full dimension preservation: {temp_path}")
                 return temp_path
             else:
-                print("[WARN] PDAL EXPORT METHOD: Advanced PDAL export failed, trying basic export")
+                print("[WARN] Enhanced export failed, trying basic export")
                 return self._basic_export_cross_section_to_laz(points)
                 
         except Exception as e:
-            print(f"[ERROR] PDAL EXPORT METHOD: Advanced PDAL export failed: {e}")
-            print("[INFO] PDAL EXPORT METHOD: Falling back to basic PDAL export")
+            print(f"[ERROR] Enhanced export failed: {e}")
             return self._basic_export_cross_section_to_laz(points)
     
     def _basic_export_cross_section_to_laz(self, points):
-        """Basic LAZ export fallback using PDAL with text file approach"""
-        print(f"[INFO] BASIC PDAL EXPORT METHOD: Starting basic PDAL export for {len(points)} points")
-        print(f"[INFO] BASIC PDAL EXPORT METHOD: Using text file -> PDAL -> LAZ approach")
-        
+        """Basic LAZ export fallback"""
         import tempfile
         import os
         try:
-            import pdal
-            import json
+            import laspy
         except ImportError:
-            print(f"[ERROR] BASIC PDAL EXPORT METHOD: PDAL library not found")
-            QMessageBox.critical(self, "Import Error", "PDAL library not found. Cannot export LAZ file.")
+            QMessageBox.critical(self, "Import Error", "laspy library not found. Cannot export LAZ file.")
             return None
             
         try:
-            # Create temporary text file with points
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as txt_file:
-                # Write header
-                txt_file.write("X,Y,Z\n")
-                # Write points
-                for point in points:
-                    txt_file.write(f"{point[0]:.6f},{point[1]:.6f},{point[2]:.6f}\n")
-                txt_file_path = txt_file.name
-            
-            # Create temporary LAZ output file
+            # Create temporary file
             temp_dir = tempfile.gettempdir()
             temp_filename = f"cross_section_{int(np.random.rand() * 1000000)}.laz"
             temp_path = os.path.join(temp_dir, temp_filename)
             
-            try:
-                # Create PDAL pipeline for reading text and writing LAZ
-                pipeline_config = [
-                    {
-                        "type": "readers.text",
-                        "filename": txt_file_path,
-                        "header": "X,Y,Z"
-                    },
-                    {
-                        "type": "writers.las",
-                        "filename": temp_path,
-                        "compression": "true"
-                    }
-                ]
+            # Get original LAS data if available from parent
+            original_las = None
+            if hasattr(self.parent(), 'layer_manager'):
+                current_layer_id = self.parent().layer_manager.get_current_layer_id()
+                if current_layer_id and current_layer_id in self.parent().layer_manager.layers:
+                    original_las = self.parent().layer_manager.layers[current_layer_id].get('las', None)
+            
+            if original_las:
+                # Create new LAS file based on original header
+                header = laspy.LasHeader(point_format=original_las.header.point_format, 
+                                       version=original_las.header.version)
+                header.offsets = original_las.header.offsets
+                header.scales = original_las.header.scales
                 
-                # Create and execute pipeline
-                pipeline = pdal.Pipeline(json.dumps(pipeline_config))
-                count = pipeline.execute()
+                # Copy CRS information
+                if hasattr(original_las.header, 'crs') and original_las.header.crs:
+                    header.crs = original_las.header.crs
                 
-                print(f"[INFO] BASIC PDAL EXPORT METHOD: Successfully exported {count} points to {temp_path}")
-                print(f"[INFO] BASIC PDAL EXPORT METHOD: Used text file intermediate: {txt_file_path}")
-                return temp_path
+                las_file = laspy.LasData(header)
                 
-            finally:
-                # Keep temporary text file for debugging - don't clean up
-                print(f"[INFO] BASIC PDAL EXPORT METHOD: Text file kept for inspection: {txt_file_path}")
-                # try:
-                #     os.remove(txt_file_path)
-                # except:
-                #     pass
+                # Set coordinates
+                las_file.x = points[:, 0]
+                las_file.y = points[:, 1] 
+                las_file.z = points[:, 2]
+                
+                # Copy other dimensions if they exist in original
+                point_indices = []
+                for point in points:
+                    # Find matching points in original data
+                    distances = np.sqrt(np.sum((original_las.xyz - point)**2, axis=1))
+                    closest_idx = np.argmin(distances)
+                    if distances[closest_idx] < 0.001:  # Very close match
+                        point_indices.append(closest_idx)
+                    else:
+                        point_indices.append(0)  # Fallback
+                
+                # Copy available dimensions
+                for dim_name in original_las.point_format.dimension_names:
+                    if dim_name not in ['X', 'Y', 'Z']:
+                        try:
+                            original_data = getattr(original_las, dim_name.lower())
+                            setattr(las_file, dim_name.lower(), original_data[point_indices])
+                        except:
+                            print(f"[WARN] Could not copy dimension: {dim_name}")
+                            
+            else:
+                # Create basic LAS file
+                header = laspy.LasHeader(point_format=3, version="1.2")
+                las_file = laspy.LasData(header)
+                las_file.x = points[:, 0]
+                las_file.y = points[:, 1]
+                las_file.z = points[:, 2]
+            
+            # Write the file
+            las_file.write(temp_path)
+            print(f"[INFO] Cross-section exported to: {temp_path}")
+            return temp_path
             
         except Exception as e:
-            print(f"[ERROR] BASIC PDAL EXPORT METHOD: Failed to export cross-section: {e}")
+            print(f"[ERROR] Failed to export cross-section: {e}")
             return None
     
     def closeEvent(self, event):
