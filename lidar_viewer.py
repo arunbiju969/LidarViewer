@@ -1,6 +1,70 @@
 import os
 import sys
 import numpy as np
+
+# Fix PROJ database warnings by setting environment variables before importing geospatial libraries
+def fix_proj_database_warnings():
+    """
+    Fix PROJ database version warnings by ensuring conda environment PROJ is prioritized.
+    This must be called before importing any geospatial libraries.
+    """
+    # Get the conda environment path
+    conda_env = os.environ.get('CONDA_PREFIX', '')
+    if conda_env:
+        # Set PROJ data directory to conda environment
+        proj_data_dir = os.path.join(conda_env, 'Library', 'share', 'proj')
+        if os.path.exists(proj_data_dir):
+            os.environ['PROJ_LIB'] = proj_data_dir
+            print(f"[PROJ] Set PROJ_LIB to: {proj_data_dir}")
+        
+        # Also ensure conda environment binaries are prioritized in PATH
+        conda_bin = os.path.join(conda_env, 'Library', 'bin')
+        if os.path.exists(conda_bin):
+            current_path = os.environ.get('PATH', '')
+            if conda_bin not in current_path.split(os.pathsep):
+                os.environ['PATH'] = conda_bin + os.pathsep + current_path
+                print(f"[PROJ] Prioritized conda binaries: {conda_bin}")
+    
+    # Additional environment variables to suppress PROJ warnings
+    os.environ['PROJ_DEBUG'] = 'OFF'
+    os.environ['PROJ_NETWORK'] = 'OFF'
+    
+    # Try to suppress PROJ warnings at the C library level
+    try:
+        # Set PROJ environment to be less verbose
+        os.environ['CPL_DEBUG'] = 'OFF'
+        os.environ['GDAL_DISABLE_READDIR_ON_OPEN'] = 'TRUE'
+        print("[PROJ] Set additional PROJ suppression variables")
+    except Exception as e:
+        print(f"[PROJ] Could not set additional variables: {e}")
+
+# Apply PROJ fix before importing any libraries that might use PROJ
+fix_proj_database_warnings()
+
+# Import centralized debug control
+from utils.debug_control import debug_print, set_debug_level
+
+# Set debug level - change to "normal", "verbose", or "all" for more output
+set_debug_level("minimal")
+
+# Additional PROJ warning suppression
+import warnings
+import logging
+
+# Suppress specific PROJ warnings about database version mismatches
+warnings.filterwarnings("ignore", message=".*PROJ.*DATABASE.LAYOUT.VERSION.*")
+warnings.filterwarnings("ignore", message=".*pj_obj_create.*")
+
+# Also try to suppress PROJ logging at the library level
+try:
+    # Suppress GDAL/PROJ error messages
+    from osgeo import gdal
+    gdal.PushErrorHandler('CPLQuietErrorHandler')
+    print("[PROJ] Configured GDAL to suppress PROJ errors")
+except ImportError:
+    # GDAL not available, continue without it
+    pass
+
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QFileDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QGroupBox, QFormLayout, QComboBox
 )
@@ -15,7 +79,12 @@ from viewer.pointcloud_viewer import PointCloudViewer
 from fileio.las_loader import load_las_file, save_last_file, load_last_file
 from layers.layer_db import save_layer_settings, load_layer_settings, generate_layer_id
 
+# Import plugin system
+from plugins.plugin_manager import PluginManager, PluginAPI
+from plugins.plugin_dialog import PluginManagerDialog
+
 print("[INFO] Starting lidar_viewer.py")
+
 class MainWindow(QMainWindow):
     def _create_view_toolbar(self):
         from viewer.view_toolbar import ViewToolbar
@@ -55,6 +124,92 @@ class MainWindow(QMainWindow):
 
     def plot_all_layers(self):
         self.layer_manager.plot_all_layers(self.viewer, self.sidebar)
+    
+    def _init_plugin_system(self):
+        """Initialize the plugin system"""
+        print("[INFO] Initializing plugin system...")
+        
+        # Create plugin API (without plugin_manager reference initially)
+        self.plugin_api = PluginAPI(
+            main_window=self,
+            viewer=self.viewer,
+            layer_manager=self.layer_manager,
+            sidebar=self.sidebar
+        )
+        
+        # Create plugin manager
+        self.plugin_manager = PluginManager(self.plugin_api)
+        
+        # Now add the plugin manager reference to the API
+        self.plugin_api.plugin_manager = self.plugin_manager
+        
+        # Connect plugin manager signals
+        self.plugin_manager.plugin_error.connect(self._on_plugin_error)
+        
+        print("[INFO] Plugin system initialized")
+    
+    def _load_plugins(self):
+        """Load and activate plugins"""
+        print("[INFO] Loading plugins...")
+        
+        # Load all available plugins
+        self.plugin_manager.load_all_plugins()
+        
+        debug_print("[DEBUG] Starting auto-activation of plugins...", "plugin")
+        
+        # Auto-activate plugins with less verbose output
+        plugins_to_activate = [
+            "Clip Plots", "CloudMetrics", "GridMetrics", 
+            "GroundFilter", "Normalize LAS", "Process All Stand Grid"
+        ]
+        
+        activated_count = 0
+        for plugin_name in plugins_to_activate:
+            if plugin_name in self.plugin_manager.get_all_plugins():
+                debug_print(f"[INFO] Auto-activating {plugin_name} plugin...", "plugin")
+                self.plugin_manager.activate_plugin(plugin_name)
+                activated_count += 1
+        
+        print(f"[INFO] {activated_count} plugins loaded and auto-activated")
+        debug_print("[DEBUG] Finished auto-activation process", "plugin")
+    
+    def _on_plugin_error(self, plugin_name: str, error_msg: str):
+        """Handle plugin errors"""
+        print(f"[ERROR] Plugin error in '{plugin_name}': {error_msg}")
+        # Could show a notification or log to file here
+    
+    def show_plugin_manager(self):
+        """Show the plugin manager dialog"""
+        if not hasattr(self, '_plugin_dialog'):
+            self._plugin_dialog = PluginManagerDialog(self.plugin_manager, self)
+        
+        self._plugin_dialog.show()
+        self._plugin_dialog.raise_()
+        self._plugin_dialog.activateWindow()
+    
+    def _safe_disconnect_signals(self):
+        """Safely disconnect signals without generating warnings"""
+        signals_to_disconnect = [
+            (self.sidebar.color_controls.dimension_box, 'currentIndexChanged'),
+            (self.sidebar.color_controls.colormap_box, 'currentIndexChanged'),
+        ]
+        
+        for widget, signal_name in signals_to_disconnect:
+            try:
+                signal = getattr(widget, signal_name)
+                # Use general disconnect() but catch any warnings
+                if hasattr(signal, 'disconnect'):
+                    try:
+                        # Try to disconnect any existing connections
+                        if hasattr(signal, 'receivers') and signal.receivers() > 0:
+                            signal.disconnect()
+                    except (TypeError, RuntimeError):
+                        # Signal had no connections or other issue - ignore
+                        pass
+            except (AttributeError, TypeError, RuntimeError):
+                # Widget doesn't exist or signal doesn't exist - ignore
+                pass
+
     def _on_point_size_changed(self, value):
         print(f"[DEBUG] Point size changed to: {value}")
         # Always save to DB
@@ -94,6 +249,59 @@ class MainWindow(QMainWindow):
             self.viewer.plotter.update()
         else:
             print("[WARN] Viewer plotter or camera not available for projection update.")
+    
+    def _on_performance_changed(self, index=None):
+        """Handle performance mode changes"""
+        performance_modes = ["auto", "performance", "quality"]
+        current_index = self.sidebar.performance_box.currentIndex()
+        mode = performance_modes[current_index]
+        
+        print(f"[PERFORMANCE] Performance mode changed to: {mode}")
+        self.viewer.set_performance_mode(mode)
+        
+        # If there are layers loaded, redraw them with the new performance settings
+        if hasattr(self, 'layer_manager') and self.layer_manager.layers:
+            print(f"[PERFORMANCE] Redrawing {len(self.layer_manager.layers)} layers with new performance mode")
+            self.plot_all_layers()
+    
+    def _on_lod_enabled_changed(self, enabled=None):
+        """Handle LOD system enable/disable"""
+        if enabled is None:
+            enabled = self.sidebar.lod_enabled_checkbox.isChecked()
+        
+        print(f"[LOD] LOD system {'enabled' if enabled else 'disabled'}")
+        if hasattr(self.viewer, 'set_lod_enabled'):
+            self.viewer.set_lod_enabled(enabled)
+        
+        # Update status label
+        if enabled:
+            self.sidebar.update_lod_status({'level': 'ready', 'final_count': 0, 'reduction_percent': 0})
+        else:
+            self.sidebar.update_lod_status(None)
+        
+        # If there are layers loaded, redraw them with the new LOD settings
+        if hasattr(self, 'layer_manager') and self.layer_manager.layers:
+            print(f"[LOD] Redrawing {len(self.layer_manager.layers)} layers with new LOD settings")
+            self.plot_all_layers()
+    
+    def _on_lod_level_changed(self, index=None):
+        """Handle manual LOD level changes"""
+        if not hasattr(self.sidebar, 'lod_level_box'):
+            return
+            
+        lod_levels = ["auto", "close", "near", "medium", "far"]
+        current_index = self.sidebar.lod_level_box.currentIndex()
+        level = lod_levels[current_index].lower() if current_index < len(lod_levels) else "auto"
+        
+        print(f"[LOD] LOD level changed to: {level}")
+        
+        # For now, we'll just log this. The LOD system will handle automatic level detection.
+        # In a future enhancement, we could add manual level override functionality.
+        
+        # If there are layers loaded, redraw them
+        if hasattr(self, 'layer_manager') and self.layer_manager.layers:
+            print(f"[LOD] Redrawing {len(self.layer_manager.layers)} layers with new LOD level")
+            self.plot_all_layers()
     def show_metadata_dialog(self, text, title="LAS Metadata"):
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
         dialog = QDialog(self)
@@ -141,7 +349,7 @@ class MainWindow(QMainWindow):
 
 
     def __init__(self, las_data=None, default_file=None):
-        print(f"[DEBUG] MainWindow.__init__ id(self)={id(self)}")
+        debug_print(f"[DEBUG] MainWindow.__init__ id(self)={id(self)}", "general")
         print("[INFO] Initializing MainWindow UI...")
         super().__init__()
         self.setWindowTitle("LiDAR Point Cloud Viewer")
@@ -150,6 +358,7 @@ class MainWindow(QMainWindow):
         self.layer_manager = LayerManager()
         self.sidebar = SidebarWidget()
         self.sidebar.setObjectName("sidebar")
+        
         # Connect layer manager's layer_toggled signal to this window's handler
         self.sidebar.layer_manager.layer_toggled.connect(self._on_layer_toggled)
         # Connect layer_selected signal to handler
@@ -158,7 +367,7 @@ class MainWindow(QMainWindow):
         self.sidebar.layer_manager.layer_added.connect(self._on_layer_added)
         self.sidebar.layer_manager.layer_removed.connect(self._on_layer_removed_debug)
         # Menu bar style is now set in _update_theme() for theme support
-        print(f"[DEBUG] SidebarWidget created: {self.sidebar}")
+        debug_print(f"[DEBUG] SidebarWidget created: {self.sidebar}", "general")
         # Set callback for custom color pickers
         self.sidebar.color_controls.on_custom_color_set = self._on_custom_color_changed
         # Set callback for point size slider
@@ -170,6 +379,10 @@ class MainWindow(QMainWindow):
         # Set initial point size in viewer (after viewer is created)
         self.viewer.set_point_size(self.sidebar.point_size_controls.get_point_size())
         print("[INFO] Sidebar and Viewer widgets created.")
+        
+        # Initialize plugin system (after viewer is created)
+        self._init_plugin_system()
+        
         # Integrate point picking (enabled by default)
         from point_picking.point_picker import PointPicker
         self.point_picker = PointPicker(self.viewer)
@@ -192,17 +405,26 @@ class MainWindow(QMainWindow):
         self._metadata_action = None    # Reference to metadata menu action
         from viewer.view_toolbar import ViewToolbar
         main_layout = QHBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)  # Remove default margins
+        main_layout.setSpacing(8)  # Set consistent spacing between elements
         main_layout.addWidget(self.sidebar)
         # Create a vertical layout for toolbar + viewer
         viewer_vlayout = QVBoxLayout()
+        viewer_vlayout.setContentsMargins(0, 8, 0, 0)  # Add top margin to create space below menu bar
         self.view_toolbar = ViewToolbar(self.viewer, main_window=self, parent=self)
         # Add toolbar with alignment left, no stretch
         viewer_vlayout.addWidget(self.view_toolbar, alignment=Qt.AlignLeft)
         
         # Create a container for the viewer with status overlay
         viewer_container = QWidget()
+        viewer_container.setStyleSheet("""
+            QWidget {
+                border: 1px solid #3daee9;
+                background-color: transparent;
+            }
+        """)
         viewer_container_layout = QVBoxLayout(viewer_container)
-        viewer_container_layout.setContentsMargins(0, 0, 0, 0)
+        viewer_container_layout.setContentsMargins(1, 1, 1, 1)  # Small margin inside border
         
         # Create status label for point picking (initially hidden)
         from PySide6.QtWidgets import QLabel
@@ -211,10 +433,11 @@ class MainWindow(QMainWindow):
             QLabel {
                 background-color: rgba(61, 174, 233, 200);
                 color: white;
-                padding: 8px 16px;
+                padding: 6px 12px;
                 border-radius: 4px;
                 font-weight: bold;
-                margin: 10px;
+                font-size: 11px;
+                margin: 8px;
             }
         """)
         self.point_picking_status_label.setAlignment(Qt.AlignCenter)
@@ -226,10 +449,11 @@ class MainWindow(QMainWindow):
             QLabel {
                 background-color: rgba(233, 174, 61, 200);
                 color: white;
-                padding: 8px 16px;
+                padding: 6px 12px;
                 border-radius: 4px;
                 font-weight: bold;
-                margin: 10px;
+                font-size: 11px;
+                margin: 8px;
             }
         """)
         self.height_profile_status_label.setAlignment(Qt.AlignCenter)
@@ -248,27 +472,37 @@ class MainWindow(QMainWindow):
         print("[INFO] Main layout and central widget set.")
         self._create_menu_bar()
         print("[INFO] Menu bar created.")
-        # Set dark mode as default
-        self.sidebar.theme_box.setCurrentText("Dark")
+        # Set light mode as default
+        self.sidebar.theme_box.setCurrentText("Light")
         self.sidebar.theme_box.currentIndexChanged.connect(self._update_theme)
         self._update_theme()
-        self.viewer.set_theme("Dark")
+        self.viewer.set_theme("Light")
+        
+        # Connect sidebar theme updates
+        self.sidebar.connect_theme_signals()
+        
         print("[INFO] Theme initialized.")
-        # Connect color by and colormap dropdowns to coloring logic (disconnect first to avoid duplicates)
-        try:
-            self.sidebar.color_controls.dimension_box.currentIndexChanged.disconnect()
-        except Exception:
-            pass
-        try:
-            self.sidebar.color_controls.colormap_box.currentIndexChanged.disconnect()
-        except Exception:
-            pass
+        # Connect color by and colormap dropdowns to coloring logic (safely disconnect first to avoid duplicates)
+        self._safe_disconnect_signals()
         self.sidebar.color_controls.dimension_box.currentIndexChanged.connect(self._on_color_by_changed)
         self.sidebar.color_controls.colormap_box.currentIndexChanged.connect(self._on_color_by_changed)
         # Connect projection box to projection handler
         self.sidebar.projection_box.currentIndexChanged.connect(self._on_projection_changed)
+        # Connect performance box to performance handler
+        self.sidebar.performance_box.currentIndexChanged.connect(self._on_performance_changed)
+        # Connect LOD controls
+        self.sidebar.lod_enabled_checkbox.toggled.connect(self._on_lod_enabled_changed)
+        self.sidebar.lod_level_box.currentIndexChanged.connect(self._on_lod_level_changed)
         # Ensure projection is set at startup
         self._on_projection_changed()
+        # Set initial performance mode
+        self._on_performance_changed()
+        # Set initial LOD settings
+        self._on_lod_enabled_changed()
+        self._on_lod_level_changed()
+
+        # Load and activate plugins
+        self._load_plugins()
 
         if las_data is not None and default_file is not None:
             from fileio.las_loader import load_point_cloud_data
@@ -493,16 +727,31 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         exit_action = file_menu.addAction("Exit")
         exit_action.triggered.connect(self.close)
+        
         # Import menu (placeholder for future import options)
         import_menu = menubar.addMenu("Import")
         import_las_action = import_menu.addAction("Import LAS/LAZ File...")
         import_las_action.triggered.connect(self.open_file)
+        
+        # Tools menu (for plugins and additional tools)
+        tools_menu = menubar.addMenu("Tools")
+        # Note: Individual tool items will be added by plugins
+        
+        # Plugins menu
+        plugins_menu = menubar.addMenu("Plugins")
+        plugin_manager_action = plugins_menu.addAction("Plugin Manager...")
+        plugin_manager_action.triggered.connect(self.show_plugin_manager)
+        
+        plugins_menu.addSeparator()
+        
+        # Note: Individual plugin menu items will be added by plugins themselves
 
     def _show_las_metadata(self):
-        if self._current_file_path:
+        current_file_path = self.layer_manager.get_current_file_path()
+        if current_file_path:
             from fileio.las_loader import get_las_metadata_summary
-            print(f"[INFO] Showing LAS metadata for: {self._current_file_path}")
-            summary = get_las_metadata_summary(self._current_file_path)
+            print(f"[INFO] Showing LAS metadata for: {current_file_path}")
+            summary = get_las_metadata_summary(current_file_path)
             self.show_metadata_dialog(summary)
         else:
             self.show_metadata_dialog("No LAS/LAZ file loaded. Cannot show metadata.", title="No File Loaded")
@@ -543,15 +792,8 @@ class MainWindow(QMainWindow):
             status_msg = f"Loaded: {os.path.basename(file_path)} ({self._points.shape[0]} points)"
             self.sidebar.update_file_info(os.path.basename(file_path), self._points.shape[0])
             self.sidebar.update_dimensions(data["dims"])
-            # Disconnect before reconnecting to avoid duplicate slot calls
-            try:
-                self.sidebar.color_controls.dimension_box.currentIndexChanged.disconnect()
-            except Exception:
-                pass
-            try:
-                self.sidebar.color_controls.colormap_box.currentIndexChanged.disconnect()
-            except Exception:
-                pass
+            # Safely disconnect before reconnecting to avoid duplicate slot calls
+            self._safe_disconnect_signals()
             self.sidebar.color_controls.dimension_box.currentIndexChanged.connect(self._on_color_by_changed)
             self.sidebar.color_controls.colormap_box.currentIndexChanged.connect(self._on_color_by_changed)
             if self._metadata_action:

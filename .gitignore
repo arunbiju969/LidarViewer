@@ -1,0 +1,159 @@
+# LiDAR Viewer - Git Ignore File
+
+# Data folders and files
+Data/
+data/
+*.las
+*.laz
+*.dtm
+*.asc
+
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.pyd
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.spyderproject
+.spyproject
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# Environments
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Application specific files
+settings.json
+*.log
+lidar_viewer.log
+layers.db
+*.db
+*.sqlite
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+*.temp
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Windows
+*.lnk
+
+# Plugin data
+plugins/plugin_data/
+plugin_data/
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Large dataset files
+*.bin
+*.xyz
+*.ply
+*.pcd
+*.pts
+
+# Output files
+Output/
+output/
+results/
+exports/
+
+# Fusion software executables (keep structure but ignore executables)
+Fusion/*.exe
+Fusion/*.dll
+
+# Conda environment files (if exported)
+environment.lock.yml
+requirements.lock.txt
+
+# Performance profiling
+*.prof
+
+# Documentation builds
+docs/_build/
+docs/build/
+
+# Test files
+test_data/
+sample_data/
+
+# Configuration overrides
+config.local.json
+settings.local.json

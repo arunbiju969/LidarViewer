@@ -9,6 +9,12 @@ class LayerManager:
         if hasattr(viewer, 'plotter'):
             viewer.plotter.clear()
         from fileio.las_loader import get_normalized_scalars
+        
+        # Track overall LOD performance
+        total_original_points = 0
+        total_rendered_points = 0
+        last_lod_info = None
+        
         for uuid, layer in self.layers.items():
             actor = layer.get('actor', None)
             if actor is not None and hasattr(viewer, 'plotter'):
@@ -39,17 +45,42 @@ class LayerManager:
                 scalars = None
                 if las is not None and dim_name and dim_name in las:
                     scalars = get_normalized_scalars(las, dim_name)
-                actor = viewer.display_point_cloud(
+                
+                # Get both actor and LOD info from display_point_cloud
+                result = viewer.display_point_cloud(
                     layer['points'],
                     scalars=scalars,
                     cmap=colormap,
                     return_actor=True,
-                    show_scalar_bar=False
+                    show_scalar_bar=False,
+                    return_lod_info=True
                 )
+                
+                if isinstance(result, tuple):
+                    actor, lod_info = result
+                    last_lod_info = lod_info
+                    total_original_points += lod_info.get('original_count', 0)
+                    total_rendered_points += lod_info.get('final_count', 0)
+                else:
+                    actor = result
+                    lod_info = None
+                
                 self.layers[uuid]['actor'] = actor
                 point_size = settings.get('point_size') if settings else None
                 if point_size is not None and hasattr(viewer, 'set_point_size'):
                     viewer.set_point_size(point_size, actor=actor)
+        
+        # Update LOD status in sidebar if available
+        if hasattr(sidebar, 'update_lod_status') and last_lod_info:
+            # Update with combined stats for all layers
+            combined_lod_info = {
+                'level': last_lod_info.get('level', 'close'),
+                'original_count': total_original_points,
+                'final_count': total_rendered_points,
+                'reduction_percent': ((total_original_points - total_rendered_points) / total_original_points * 100) if total_original_points > 0 else 0
+            }
+            sidebar.update_lod_status(combined_lod_info)
+        
         # Remove scalar bar/legend if present
         if hasattr(viewer, 'plotter'):
             try:

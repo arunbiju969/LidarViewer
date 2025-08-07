@@ -31,16 +31,24 @@ class ViewToolbar(QToolBar):
                 self.addSeparator()
         # Add separator before point picking toggle
         self.addSeparator()
+        
         # Add point picking toggle action
         self.point_picking_action = QAction("Enable Point Picking", self)
         self.point_picking_action.triggered.connect(self._toggle_point_picking)
         self.addAction(self.point_picking_action)
+        
+        # Add separator before bounding box toggle
+        self.addSeparator()
+        
         # Add bounding box toggle action
         self.bounding_box_action = QAction("Show Bounding Box", self)
         self.bounding_box_action.setCheckable(True)
         self.bounding_box_action.setChecked(False)
         self.bounding_box_action.triggered.connect(self._toggle_bounding_box)
         self.addAction(self.bounding_box_action)
+        
+        # Add separator before height profile toggle
+        self.addSeparator()
         
         # Add height profile toggle action
         self.height_profile_action = QAction("Height Profile", self)

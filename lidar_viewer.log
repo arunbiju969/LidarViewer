@@ -5,3 +5,15 @@
 2025-07-29 10:45:48,010 [DEBUG] platform is win32
 2025-07-29 10:45:48,094 [DEBUG] CACHEDIR=C:\Users\W0491597\.matplotlib
 2025-07-29 10:45:48,094 [DEBUG] Using fontManager instance from C:\Users\W0491597\.matplotlib\fontlist-v390.json
+2025-08-07 12:43:45,740 - LidarViewer - INFO - Test info message
+2025-08-07 12:43:45,740 - LidarViewer - WARNING - Test warning message
+2025-08-07 12:43:45,740 - LidarViewer - ERROR - Test error message
+2025-08-07 12:43:45,741 - LidarViewer - INFO - This info should be suppressed
+2025-08-07 12:43:45,741 - LidarViewer - ERROR - This error should still appear
+2025-08-07 12:43:45,753 - LidarViewer - ERROR - LidarViewerException: Failed to load layer: test_file.las - File not found (code: LAYER_LOAD_ERROR)
+2025-08-07 12:43:45,753 - LidarViewer - ERROR - Error executing failing_function: Test error
+2025-08-07 12:43:45,754 - LidarViewer - ERROR - Error in test operation: Test error
+Traceback (most recent call last):
+  File "c:\Users\W0491597\Documents\Arun\LidarViewer\test_quality_improvements.py", line 146, in test_error_handling
+    raise ValueError("Test error")
+ValueError: Test error

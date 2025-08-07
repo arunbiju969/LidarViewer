@@ -1,3 +1,11 @@
+# Fix PROJ database warnings before importing PDAL
+import os
+import warnings
+
+# Suppress PROJ warnings about database version mismatches
+warnings.filterwarnings("ignore", message=".*PROJ.*DATABASE.LAYOUT.VERSION.*")
+warnings.filterwarnings("ignore", message=".*pj_obj_create.*")
+
 def load_point_cloud_data(file_path, chunk_size=100000):
     """
     Loads a LAS/LAZ file and returns a dict with:
