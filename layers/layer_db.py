@@ -1,20 +1,28 @@
 # LayerManager class to encapsulate layer state and management logic
+import colorsys
+import numpy as np
+VALUE_COLORMAP_OPTION = "Value Colors"
+
+
 class LayerManager:
+    VALUE_COLORMAP_OPTION = VALUE_COLORMAP_OPTION
+
+    def __init__(self):
+        # uuid -> dict with file_path, points, las, visible, actor
+        self.layers = {}
+        self.current_layer_id = None
+        self.current_file_path = None
+
     def plot_all_layers(self, viewer, sidebar):
-        """
-        Clear and redraw all visible layers in the plotter.
-        Handles all point plotting, coloring, and point size updates.
-        """
+        """Clear and redraw all visible layers in the plotter."""
         print("[PLOTTER] plot_all_layers: clearing plotter and redrawing all visible layers")
         if hasattr(viewer, 'plotter'):
             viewer.plotter.clear()
-        from fileio.las_loader import get_normalized_scalars
-        
-        # Track overall LOD performance
+
         total_original_points = 0
         total_rendered_points = 0
         last_lod_info = None
-        
+
         for uuid, layer in self.layers.items():
             actor = layer.get('actor', None)
             if actor is not None and hasattr(viewer, 'plotter'):
@@ -22,57 +30,39 @@ class LayerManager:
                     viewer.plotter.remove_actor(actor)
                 except Exception as e:
                     print(f"[WARN] Could not remove actor for layer {uuid}: {e}")
-            if layer['visible']:
-                from layers.layer_db import load_layer_settings
-                settings = load_layer_settings(uuid)
-                las = layer.get('las', None)
-                dim_name = settings.get('dimension') if settings else None
-                colormap = settings.get('colormap') if settings else None
-                # Handle custom colormap
-                if colormap == "Custom":
-                    try:
-                        from matplotlib.colors import LinearSegmentedColormap
-                        color_start = settings.get('color_start', '#0000ff') or '#0000ff'
-                        color_mid = settings.get('color_mid', '#00ff00') or '#00ff00'
-                        color_end = settings.get('color_end', '#ff0000') or '#ff0000'
-                        custom_cmap = LinearSegmentedColormap.from_list(
-                            'custom_cmap', [color_start, color_mid, color_end]
-                        )
-                        colormap = custom_cmap
-                    except Exception as e:
-                        print(f"[WARN] Failed to create custom colormap, falling back to 'viridis': {e}")
-                        colormap = 'viridis'
-                scalars = None
-                if las is not None and dim_name and dim_name in las:
-                    scalars = get_normalized_scalars(las, dim_name)
-                
-                # Get both actor and LOD info from display_point_cloud
-                result = viewer.display_point_cloud(
-                    layer['points'],
-                    scalars=scalars,
-                    cmap=colormap,
-                    return_actor=True,
-                    show_scalar_bar=False,
-                    return_lod_info=True
-                )
-                
-                if isinstance(result, tuple):
-                    actor, lod_info = result
-                    last_lod_info = lod_info
-                    total_original_points += lod_info.get('original_count', 0)
-                    total_rendered_points += lod_info.get('final_count', 0)
-                else:
-                    actor = result
-                    lod_info = None
-                
-                self.layers[uuid]['actor'] = actor
-                point_size = settings.get('point_size') if settings else None
-                if point_size is not None and hasattr(viewer, 'set_point_size'):
-                    viewer.set_point_size(point_size, actor=actor)
-        
-        # Update LOD status in sidebar if available
+
+            if not layer.get('visible', False):
+                self.layers[uuid]['actor'] = None
+                continue
+
+            settings = load_layer_settings(uuid)
+            scalars, colormap = self._prepare_layer_coloring(layer, settings)
+
+            result = viewer.display_point_cloud(
+                layer['points'],
+                scalars=scalars,
+                cmap=colormap,
+                return_actor=True,
+                show_scalar_bar=False,
+                return_lod_info=True
+            )
+
+            if isinstance(result, tuple):
+                actor, lod_info = result
+                last_lod_info = lod_info
+                total_original_points += lod_info.get('original_count', 0)
+                total_rendered_points += lod_info.get('final_count', 0)
+            else:
+                actor = result
+                lod_info = None
+
+            self.layers[uuid]['actor'] = actor
+
+            point_size = settings.get('point_size') if settings else None
+            if point_size is not None and hasattr(viewer, 'set_point_size'):
+                viewer.set_point_size(point_size, actor=actor)
+
         if hasattr(sidebar, 'update_lod_status') and last_lod_info:
-            # Update with combined stats for all layers
             combined_lod_info = {
                 'level': last_lod_info.get('level', 'close'),
                 'original_count': total_original_points,
@@ -80,8 +70,7 @@ class LayerManager:
                 'reduction_percent': ((total_original_points - total_rendered_points) / total_original_points * 100) if total_original_points > 0 else 0
             }
             sidebar.update_lod_status(combined_lod_info)
-        
-        # Remove scalar bar/legend if present
+
         if hasattr(viewer, 'plotter'):
             try:
                 viewer.plotter.remove_scalar_bar()
@@ -96,6 +85,7 @@ class LayerManager:
         if not (current_layer_id and current_layer_id in self.layers):
             print("[WARN] redraw_current_layer: No current layer to redraw.")
             return
+
         uuid = current_layer_id
         layer = self.layers[uuid]
         if hasattr(viewer, 'plotter'):
@@ -105,30 +95,11 @@ class LayerManager:
                     viewer.plotter.remove_actor(actor)
                 except Exception as e:
                     print(f"[WARN] Could not remove actor for layer {uuid}: {e}")
-        from layers.layer_db import load_layer_settings
+
         settings = load_layer_settings(uuid)
-        las = layer.get('las', None)
-        dim_name = settings.get('dimension') if settings else None
-        colormap = settings.get('colormap') if settings else None
+        scalars, colormap = self._prepare_layer_coloring(layer, settings)
         point_size = settings.get('point_size') if settings else None
-        scalars = None
-        if las is not None and dim_name and dim_name in las:
-            from fileio.las_loader import get_normalized_scalars
-            scalars = get_normalized_scalars(las, dim_name)
-        # Handle custom colormap
-        if colormap == "Custom":
-            try:
-                from matplotlib.colors import LinearSegmentedColormap
-                color_start = settings.get('color_start', '#0000ff') or '#0000ff'
-                color_mid = settings.get('color_mid', '#00ff00') or '#00ff00'
-                color_end = settings.get('color_end', '#ff0000') or '#ff0000'
-                custom_cmap = LinearSegmentedColormap.from_list(
-                    'custom_cmap', [color_start, color_mid, color_end]
-                )
-                colormap = custom_cmap
-            except Exception as e:
-                print(f"[WARN] Failed to create custom colormap, falling back to 'viridis': {e}")
-                colormap = 'viridis'
+
         actor = viewer.display_point_cloud(
             layer['points'],
             scalars=scalars,
@@ -136,16 +107,12 @@ class LayerManager:
             return_actor=True,
             show_scalar_bar=False
         )
+
         self.layers[uuid]['actor'] = actor
         if point_size is not None and hasattr(viewer, 'set_point_size'):
             viewer.set_point_size(point_size, actor=actor)
         if hasattr(viewer, 'plotter'):
             viewer.plotter.update()
-    def __init__(self):
-        # uuid -> dict with file_path, points, las, visible, actor
-        self.layers = {}
-        self.current_layer_id = None
-        self.current_file_path = None
 
     def add_layer(self, uuid, file_path, points, las, visible=True, actor=None):
         self.layers[uuid] = {
@@ -190,6 +157,77 @@ class LayerManager:
 
     def get_current_file_path(self):
         return self.current_file_path
+
+    def _prepare_layer_coloring(self, layer, settings):
+        if not settings:
+            return None, None
+
+        colormap_choice = settings.get('colormap')
+        dim_name = settings.get('dimension')
+        las = layer.get('las')
+        scalars = None
+        cmap = colormap_choice
+
+        if las is not None and dim_name and dim_name in las:
+            if colormap_choice == self.VALUE_COLORMAP_OPTION:
+                scalars = self._generate_value_color_scalars(las[dim_name])
+                cmap = None
+            else:
+                from fileio.las_loader import get_normalized_scalars
+                scalars = get_normalized_scalars(las, dim_name)
+
+        if colormap_choice == "Custom":
+            try:
+                cmap = self._build_custom_colormap(settings)
+            except Exception as e:
+                print(f"[WARN] Failed to create custom colormap, falling back to 'viridis': {e}")
+                cmap = 'viridis'
+        elif colormap_choice == self.VALUE_COLORMAP_OPTION:
+            cmap = None
+
+        return scalars, cmap
+
+    def _build_custom_colormap(self, settings):
+        from matplotlib.colors import LinearSegmentedColormap
+
+        safe_settings = settings or {}
+        color_start = safe_settings.get('color_start', '#0000ff') or '#0000ff'
+        color_mid = safe_settings.get('color_mid', '#00ff00') or '#00ff00'
+        color_end = safe_settings.get('color_end', '#ff0000') or '#ff0000'
+        return LinearSegmentedColormap.from_list('custom_cmap', [color_start, color_mid, color_end])
+
+    def _generate_value_color_scalars(self, values):
+        if values is None:
+            return None
+
+        np_values = np.asarray(values)
+        if np_values.size == 0:
+            return np.empty((0, 3), dtype=np.float32)
+
+        unique_vals, inverse_indices = np.unique(np_values, return_inverse=True)
+        if unique_vals.size == 0:
+            return np.empty((0, 3), dtype=np.float32)
+
+        if unique_vals.size > 512:
+            print(f"[COLOR] Value Colors: {unique_vals.size} unique values detected; colors may repeat periodically.")
+        palette = self._generate_value_color_palette(unique_vals.size)
+        return palette[inverse_indices]
+
+    def _generate_value_color_palette(self, count: int) -> np.ndarray:
+        golden_ratio = 0.61803398875
+        secondary_ratio = 0.38196601125
+        tertiary_ratio = 0.70710678118
+        colors = np.empty((count, 3), dtype=np.float32)
+
+        for i in range(count):
+            hue = (i * golden_ratio) % 1.0
+            saturation = 0.65 + 0.30 * ((i * secondary_ratio) % 1.0)
+            value = 0.70 + 0.25 * ((i * tertiary_ratio) % 1.0)
+            if i % 2 == 1:
+                value = max(0.45, value - 0.25)
+            colors[i] = colorsys.hsv_to_rgb(hue, min(saturation, 0.95), min(value, 0.95))
+
+        return colors
 import sqlite3
 import json
 import os

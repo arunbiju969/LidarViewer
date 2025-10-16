@@ -1,6 +1,8 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QColorDialog)
 from PySide6.QtCore import Qt
 
+from layers.layer_db import VALUE_COLORMAP_OPTION
+
 
 class ColorControlsUIStyles:
     """Theme-aware styling for color controls components"""
@@ -100,7 +102,7 @@ class ColorControlsUIStyles:
             app = QApplication.instance()
             if app:
                 # Try to get the main window and check its theme
-                for widget in app.topLevelWidgets():
+                for widget in app.topLevelWidgets():  # type: ignore[attr-defined]
                     if hasattr(widget, 'sidebar') and hasattr(widget.sidebar, 'theme_box'):
                         current_theme = widget.sidebar.theme_box.currentText()
                         return current_theme.lower() == "dark"
@@ -123,9 +125,10 @@ class ColorControlsWidget(QWidget):
         # Colormap dropdown
         self.colormap_box = QComboBox()
         self.colormap_box.addItems([
-            "viridis", "plasma", "inferno", "magma", "cividis", "jet", "cool", "hot", "spring", "summer", "autumn", "winter", "gray", "Custom"
+            "viridis", "plasma", "inferno", "magma", "cividis", "jet", "cool", "hot", "spring", "summer", "autumn", "winter", "gray", VALUE_COLORMAP_OPTION, "Custom"
         ])
         self.colormap_box.setCurrentText("viridis")
+        self.colormap_box.currentTextChanged.connect(self._on_colormap_changed)
 
         # Color pickers for custom gradient
         self.color_start_btn = QPushButton("Start")
@@ -173,6 +176,8 @@ class ColorControlsWidget(QWidget):
         layout.addWidget(self.colormap_box)
         layout.addLayout(color_layout)
         self.setLayout(layout)
+        # Ensure color pickers reflect current mode
+        self._on_colormap_changed(self.colormap_box.currentText())
 
     def update_theme_styling(self):
         """Update theme styling for all color control components"""
@@ -213,3 +218,17 @@ class ColorControlsWidget(QWidget):
             self.dimension_box.addItem("(No color dimension)")
             self.dimension_box.setEnabled(False)
         self.dimension_box.blockSignals(False)
+
+    def _on_colormap_changed(self, value: str):
+        is_custom = value == "Custom"
+        is_value_colors = value == VALUE_COLORMAP_OPTION
+        tooltip_map = {
+            'custom': "Pick the gradient control color for this stop.",
+            'value_colors': "Colors are generated automatically for each unique value.",
+            'other': "Switch to Custom to edit gradient colors manually."
+        }
+        tooltip_key = 'custom' if is_custom else ('value_colors' if is_value_colors else 'other')
+        tooltip = tooltip_map[tooltip_key]
+        for btn in (self.color_start_btn, self.color_mid_btn, self.color_end_btn):
+            btn.setEnabled(is_custom)
+            btn.setToolTip(tooltip)

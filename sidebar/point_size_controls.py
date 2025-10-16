@@ -1,4 +1,5 @@
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QSlider
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QSlider, QPushButton
+from .sidebar_widget import SidebarUIStyles
 from PySide6.QtCore import Qt
 
 
@@ -64,46 +65,74 @@ class PointSizeUIStyles:
 class PointSizeControlsWidget(QWidget):
     def __init__(self, parent=None, min_size=1, max_size=20, default_size=3):
         super().__init__(parent)
+        self.min_size = min_size
+        self.max_size = max_size
+        self.value = default_size
         self.layout = QHBoxLayout(self)
-        self.label = QLabel(f"Point Size: {default_size}", self)
-        self.slider = QSlider(Qt.Horizontal, self)
-        self.slider.setMinimum(min_size)
-        self.slider.setMaximum(max_size)
-        self.slider.setValue(default_size)
-        self.slider.setTickInterval(1)
-        self.slider.setTickPosition(QSlider.TicksBelow)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(4)
+        self.btn_decrease = QPushButton("−", self)  # Use Unicode minus for better appearance
+        self.btn_increase = QPushButton("+", self)
+        self.btn_decrease.setFixedWidth(28)
+        self.btn_increase.setFixedWidth(28)
+        # Apply sidebar button style for consistency
+        self.btn_decrease.setStyleSheet(SidebarUIStyles.get_button_style())
+        self.btn_increase.setStyleSheet(SidebarUIStyles.get_button_style())
+        # Set font to match other sidebar buttons (bold, same size)
+        font = self.btn_decrease.font()
+        font.setBold(True)
+        font.setPointSize(12)
+        self.btn_decrease.setFont(font)
+        self.btn_increase.setFont(font)
+        self.btn_decrease.clicked.connect(self._decrease)
+        self.btn_increase.clicked.connect(self._increase)
+        self.label = QLabel(f"{self.value}", self)
+        self.label.setAlignment(Qt.AlignCenter)
+        self.label.setMinimumWidth(32)
+        self.layout.addStretch(1)
+        self.layout.addWidget(self.btn_decrease)
         self.layout.addWidget(self.label)
-        self.layout.addWidget(self.slider)
+        self.layout.addWidget(self.btn_increase)
+        self.layout.addStretch(1)
         self.setLayout(self.layout)
-        self.slider.valueChanged.connect(self._on_slider_changed)
         self.on_point_size_changed = None  # Callback for parent
-        
         # Store styled components for theme updates
         self._styled_components = [
             ('label', self.label),
-            ('slider', self.slider),
+            ('button', self.btn_decrease),
+            ('button', self.btn_increase),
         ]
 
-    def _on_slider_changed(self, value):
-        self.label.setText(f"Point Size: {value}")
-        if self.on_point_size_changed:
-            self.on_point_size_changed(value)
+    def _decrease(self):
+        if self.value > self.min_size:
+            self.value -= 1
+            self.label.setText(str(self.value))
+            if self.on_point_size_changed:
+                self.on_point_size_changed(self.value)
+
+    def _increase(self):
+        if self.value < self.max_size:
+            self.value += 1
+            self.label.setText(str(self.value))
+            if self.on_point_size_changed:
+                self.on_point_size_changed(self.value)
 
     def set_point_size(self, value):
-        self.slider.setValue(value)
+        if self.min_size <= value <= self.max_size:
+            self.value = value
+            self.label.setText(str(self.value))
 
     def get_point_size(self):
-        return self.slider.value()
-    
+        return self.value
+
     def update_theme_styling(self):
         """Update theme styling for point size control components"""
         is_dark = PointSizeUIStyles.should_apply_dark_pointsize_style()
-        
         for component_type, widget in self._styled_components:
             if is_dark:
                 if component_type == 'label':
                     widget.setStyleSheet(PointSizeUIStyles.get_label_style())
-                elif component_type == 'slider':
-                    widget.setStyleSheet(PointSizeUIStyles.get_slider_style())
+                elif component_type == 'button':
+                    widget.setStyleSheet(SidebarUIStyles.get_button_style())
             else:
                 widget.setStyleSheet("")  # Clear custom styling for light theme

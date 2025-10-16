@@ -1,9 +1,12 @@
+from typing import Optional
+
 import pyvista as pv
 from pyvistaqt import QtInteractor
 from PySide6.QtWidgets import QWidget, QHBoxLayout
 from .plotter_update_manager import PlotterUpdateManager
 from .lod_system import get_lod_system
 import time
+import numpy as np
 
 class PointCloudViewer(QWidget):
     def set_back_view(self):
@@ -103,7 +106,7 @@ class PointCloudViewer(QWidget):
     def __init__(self, parent=None):
         from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QPushButton
         super().__init__(parent)
-        self.plotter = QtInteractor(self)
+        self.plotter = QtInteractor(self)  # type: ignore[arg-type]
         self.plotter.add_axes()
         layout = QHBoxLayout()
         layout.addWidget(self.plotter)
@@ -112,6 +115,7 @@ class PointCloudViewer(QWidget):
         self._point_size = 3
         self._performance_mode = "auto"  # "auto", "performance", "quality"
         self._large_dataset_threshold = 100000  # Points threshold for auto mode
+        self.last_bounds = None
         
         # Initialize update manager for optimized plotter updates
         self.update_manager = PlotterUpdateManager(self.plotter)
@@ -162,7 +166,7 @@ class PointCloudViewer(QWidget):
         """Get current LOD system status and performance statistics"""
         return self.lod_system.get_lod_summary()
     
-    def force_lod_level(self, level: str = None):
+    def force_lod_level(self, level: Optional[str] = None):
         """
         Force a specific LOD level for testing or manual control.
         
@@ -227,18 +231,38 @@ class PointCloudViewer(QWidget):
         render_points = lod_points
         render_scalars = lod_scalars
         
+        scalars_array = None
+        direct_color_scalars = False
         if render_scalars is not None:
-            used_cmap = cmap if cmap is not None else self._colormap
-            actor = self.plotter.add_points(
-                render_points,
-                scalars=render_scalars,
-                cmap=used_cmap,
-                render_points_as_spheres=use_spheres,  # Dynamic based on performance mode
-                point_size=point_size,
-                scalar_bar_args=scalar_bar_args,
-                show_scalar_bar=show_scalar_bar,
-                pickable=True
-            )
+            try:
+                scalars_array = np.asarray(render_scalars)
+                direct_color_scalars = scalars_array.ndim == 2 and scalars_array.shape[1] in (3, 4)
+            except Exception:
+                scalars_array = render_scalars
+                direct_color_scalars = False
+
+        if scalars_array is not None:
+            if direct_color_scalars:
+                actor = self.plotter.add_points(
+                    render_points,
+                    scalars=scalars_array,
+                    render_points_as_spheres=use_spheres,
+                    point_size=point_size,
+                    show_scalar_bar=False,
+                    pickable=True
+                )
+            else:
+                used_cmap = cmap if cmap is not None else self._colormap
+                actor = self.plotter.add_points(
+                    render_points,
+                    scalars=scalars_array,
+                    cmap=used_cmap,
+                    render_points_as_spheres=use_spheres,
+                    point_size=point_size,
+                    scalar_bar_args=scalar_bar_args,
+                    show_scalar_bar=show_scalar_bar,
+                    pickable=True
+                )
         else:
             actor = self.plotter.add_points(
                 render_points, 
