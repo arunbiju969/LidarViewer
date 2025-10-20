@@ -2,7 +2,7 @@ from typing import Optional
 
 import pyvista as pv
 from pyvistaqt import QtInteractor
-from PySide6.QtWidgets import QWidget, QHBoxLayout
+from PyQt6.QtWidgets import QWidget, QHBoxLayout
 from .plotter_update_manager import PlotterUpdateManager
 from .lod_system import get_lod_system
 import time
@@ -104,7 +104,7 @@ class PointCloudViewer(QWidget):
             self.plotter.reset_camera()
             self.update_manager.request_update()
     def __init__(self, parent=None):
-        from PySide6.QtWidgets import QVBoxLayout, QHBoxLayout, QPushButton
+        from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QPushButton
         super().__init__(parent)
         self.plotter = QtInteractor(self)  # type: ignore[arg-type]
         self.plotter.add_axes()

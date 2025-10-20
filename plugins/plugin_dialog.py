@@ -7,13 +7,13 @@ and configuring plugins.
 
 import os
 from typing import Dict, List
-from PySide6.QtWidgets import (
+from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTreeWidget, QTreeWidgetItem,
     QPushButton, QLabel, QTextEdit, QGroupBox, QCheckBox, QSplitter,
     QMessageBox, QHeaderView, QLineEdit, QComboBox, QFormLayout
 )
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QFont
 
 from .plugin_manager import PluginManager, BasePlugin
 
@@ -270,7 +270,7 @@ class PluginManagerDialog(QDialog):
         if info.enabled:
             plugin_item.setForeground(2, plugin_item.foreground(0))
         else:
-            from PySide6.QtGui import QColor
+            from PyQt6.QtGui import QColor
             plugin_item.setForeground(2, QColor("red"))
         
         category_item.addChild(plugin_item)

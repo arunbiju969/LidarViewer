@@ -1,5 +1,5 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QColorDialog)
-from PySide6.QtCore import Qt
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QColorDialog)
+from PyQt6.QtCore import Qt
 
 from layers.layer_db import VALUE_COLORMAP_OPTION
 
@@ -98,7 +98,7 @@ class ColorControlsUIStyles:
     def should_apply_dark_color_style():
         """Check if we should apply dark theme styling"""
         try:
-            from PySide6.QtWidgets import QApplication
+            from PyQt6.QtWidgets import QApplication
             app = QApplication.instance()
             if app:
                 # Try to get the main window and check its theme

@@ -1,18 +1,18 @@
-from PySide6.QtWidgets import QToolBar
-from PySide6.QtGui import QAction
-from PySide6.QtCore import Qt
+from PyQt6.QtWidgets import QToolBar
+from PyQt6.QtGui import QAction
+from PyQt6.QtCore import Qt
 
 class ViewToolbar(QToolBar):
     def __init__(self, viewer, main_window=None, parent=None):
-        from PySide6.QtWidgets import QSizePolicy
+        from PyQt6.QtWidgets import QSizePolicy
         super().__init__("View Toolbar", parent)
         self.viewer = viewer
         self.main_window = main_window
         self._add_view_actions()
         # Make toolbar expand horizontally
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         # Set focus policies to prevent blue border
-        self.setFocusPolicy(Qt.NoFocus)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
     def _add_view_actions(self):
         view_actions = [

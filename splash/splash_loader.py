@@ -1,6 +1,6 @@
-from PySide6.QtWidgets import QSplashScreen, QProgressBar, QLabel
-from PySide6.QtGui import QPixmap, QPainter, QColor, QFont
-from PySide6.QtCore import Qt, QRect
+from PyQt6.QtWidgets import QSplashScreen, QProgressBar, QLabel
+from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
+from PyQt6.QtCore import Qt, QRect
 
 def create_splash():
     splash_pix = QPixmap(500, 200)
@@ -11,10 +11,10 @@ def create_splash():
     font.setPointSize(16)
     font.setBold(True)
     painter.setFont(font)
-    painter.drawText(QRect(0, 60, 500, 40), Qt.AlignCenter, "Loading point cloud...")
+    painter.drawText(QRect(0, 60, 500, 40), Qt.AlignmentFlag.AlignCenter, "Loading point cloud...")
     painter.end()
 
-    splash = QSplashScreen(splash_pix, Qt.WindowStaysOnTopHint)
+    splash = QSplashScreen(splash_pix, Qt.WindowType.WindowStaysOnTopHint)
     progress_bar = QProgressBar(splash)
     progress_bar.setGeometry(50, 140, 400, 25)
     progress_bar.setRange(0, 100)

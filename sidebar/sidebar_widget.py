@@ -1,7 +1,7 @@
-from PySide6.QtWidgets import (
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QGroupBox, QFormLayout, QComboBox, QPushButton, QColorDialog, QHBoxLayout, QCheckBox
 )
-from PySide6.QtCore import Qt
+from PyQt6.QtCore import Qt
 from .layer_manager_widget import LayerManagerWidget
 from theme.theme_manager import UnifiedThemeManager
 
@@ -155,7 +155,7 @@ class SidebarUIStyles:
     def should_apply_dark_sidebar_style():
         """Check if we should apply dark theme sidebar styling"""
         try:
-            from PySide6.QtWidgets import QApplication
+            from PyQt6.QtWidgets import QApplication
             app = QApplication.instance()
             if app:
                 # Try to get the main window and check its theme
@@ -285,7 +285,7 @@ class SidebarWidget(QWidget):
         self.layer_manager = LayerManagerWidget()
         self.button = QPushButton("Open LAS/LAZ File")
         self.status_label = QLabel("")
-        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.info_group = QGroupBox("Point Cloud Info")
         self.info_group.setCheckable(True)
         self.info_group.setChecked(True)

@@ -3,7 +3,7 @@ Plotter Update Manager - Optimizes PyVista plotter updates
 Reduces unnecessary redraws and improves performance
 """
 
-from PySide6.QtCore import QTimer
+from PyQt6.QtCore import QTimer
 from typing import Optional
 
 class PlotterUpdateManager:

@@ -1,6 +1,6 @@
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QSlider, QPushButton
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QSlider, QPushButton
 from .sidebar_widget import SidebarUIStyles
-from PySide6.QtCore import Qt
+from PyQt6.QtCore import Qt
 
 
 class PointSizeUIStyles:
@@ -48,7 +48,7 @@ class PointSizeUIStyles:
     def should_apply_dark_pointsize_style():
         """Check if we should apply dark theme styling"""
         try:
-            from PySide6.QtWidgets import QApplication
+            from PyQt6.QtWidgets import QApplication
             app = QApplication.instance()
             if app:
                 # Try to get the main window and check its theme
@@ -87,7 +87,7 @@ class PointSizeControlsWidget(QWidget):
         self.btn_decrease.clicked.connect(self._decrease)
         self.btn_increase.clicked.connect(self._increase)
         self.label = QLabel(f"{self.value}", self)
-        self.label.setAlignment(Qt.AlignCenter)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label.setMinimumWidth(32)
         self.layout.addStretch(1)
         self.layout.addWidget(self.btn_decrease)

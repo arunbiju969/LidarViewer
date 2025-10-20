@@ -5,17 +5,17 @@ This module provides the ProfileViewer dialog for displaying height vs distance 
 
 import sys
 import numpy as np
-from PySide6.QtWidgets import (
+from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
     QLabel, QSpinBox, QDoubleSpinBox, QGroupBox, QFormLayout, QMessageBox
 )
-from PySide6.QtCore import Qt
+from PyQt6.QtCore import Qt
 
 try:
     import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
     from matplotlib.figure import Figure
-    from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+    from matplotlib.backends.backend_qt import NavigationToolbar2QT as NavigationToolbar
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
@@ -275,7 +275,8 @@ class ProfileViewer(QDialog):
             QMessageBox.warning(self, "No Data", "No profile data to export.")
             return
             
-        from PySide6.QtWidgets import QFileDialog
+        # Get file path from user
+        from PyQt6.QtWidgets import QFileDialog
         
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Export Profile Data", "height_profile.csv", 
@@ -320,7 +321,7 @@ class ProfileViewer(QDialog):
             QMessageBox.warning(self, "Cannot Save", "No plot to save.")
             return
             
-        from PySide6.QtWidgets import QFileDialog
+        from PyQt6.QtWidgets import QFileDialog
         
         file_path, _ = QFileDialog.getSaveFileName(
             self, "Save Profile Image", "height_profile.png",

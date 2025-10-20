@@ -65,11 +65,11 @@ except ImportError:
     # GDAL not available, continue without it
     pass
 
-from PySide6.QtWidgets import (
+from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QFileDialog, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QGroupBox, QFormLayout, QComboBox
 )
 from splash.splash_loader import create_splash
-from PySide6.QtCore import Qt
+from PyQt6.QtCore import Qt
 from pyvistaqt import QtInteractor
 
 
@@ -303,7 +303,7 @@ class MainWindow(QMainWindow):
             print(f"[LOD] Redrawing {len(self.layer_manager.layers)} layers with new LOD level")
             self.plot_all_layers()
     def show_metadata_dialog(self, text, title="LAS Metadata"):
-        from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
         dialog = QDialog(self)
         dialog.setWindowTitle(title)
         layout = QVBoxLayout(dialog)
@@ -413,7 +413,7 @@ class MainWindow(QMainWindow):
         viewer_vlayout.setContentsMargins(0, 8, 0, 0)  # Add top margin to create space below menu bar
         self.view_toolbar = ViewToolbar(self.viewer, main_window=self, parent=self)
         # Add toolbar with alignment left, no stretch
-        viewer_vlayout.addWidget(self.view_toolbar, alignment=Qt.AlignLeft)
+        viewer_vlayout.addWidget(self.view_toolbar, alignment=Qt.AlignmentFlag.AlignLeft)
         
         # Create a container for the viewer with status overlay
         viewer_container = QWidget()
@@ -427,7 +427,7 @@ class MainWindow(QMainWindow):
         viewer_container_layout.setContentsMargins(1, 1, 1, 1)  # Small margin inside border
         
         # Create status label for point picking (initially hidden)
-        from PySide6.QtWidgets import QLabel
+        from PyQt6.QtWidgets import QLabel
         self.point_picking_status_label = QLabel("Point Picking Enabled")
         self.point_picking_status_label.setStyleSheet("""
             QLabel {
@@ -440,7 +440,7 @@ class MainWindow(QMainWindow):
                 margin: 8px;
             }
         """)
-        self.point_picking_status_label.setAlignment(Qt.AlignCenter)
+        self.point_picking_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.point_picking_status_label.hide()
         
         # Create status label for height profile (initially hidden)
@@ -456,7 +456,7 @@ class MainWindow(QMainWindow):
                 margin: 8px;
             }
         """)
-        self.height_profile_status_label.setAlignment(Qt.AlignCenter)
+        self.height_profile_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.height_profile_status_label.hide()
         
         # Add status labels and viewer to container
@@ -670,8 +670,8 @@ class MainWindow(QMainWindow):
             self.viewer.plotter.update()
 
     def _create_view_toolbar(self):
-        from PySide6.QtWidgets import QToolBar
-        from PySide6.QtGui import QAction
+        from PyQt6.QtWidgets import QToolBar
+        from PyQt6.QtGui import QAction
         toolbar = QToolBar("View Toolbar")
         self.addToolBar(toolbar)
 
@@ -1013,7 +1013,7 @@ class MainWindow(QMainWindow):
         """Export current layer as LAZ file"""
         current_layer_id = self.layer_manager.get_current_layer_id()
         if not current_layer_id or current_layer_id not in self.layer_manager.layers:
-            from PySide6.QtWidgets import QMessageBox
+            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "No Layer", "No current layer available for export.")
             return
             
@@ -1023,12 +1023,12 @@ class MainWindow(QMainWindow):
         file_path = layer.get('file_path', 'unknown')
         
         if points is None or points.shape[0] == 0:
-            from PySide6.QtWidgets import QMessageBox
+            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "No Data", "Current layer has no points to export.")
             return
         
         # Get output file path
-        from PySide6.QtWidgets import QFileDialog
+        from PyQt6.QtWidgets import QFileDialog
         import os
         
         default_name = f"exported_{os.path.splitext(os.path.basename(file_path))[0]}.laz"
@@ -1051,18 +1051,18 @@ class MainWindow(QMainWindow):
             )
             
             if success:
-                from PySide6.QtWidgets import QMessageBox
+                from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.information(self, "Export Successful", 
                                       f"Layer exported successfully:\n{output_path}\n\n"
                                       f"Points: {len(points):,}")
                 print(f"[INFO] Layer exported: {output_path} ({len(points)} points)")
             else:
-                from PySide6.QtWidgets import QMessageBox
+                from PyQt6.QtWidgets import QMessageBox
                 QMessageBox.critical(self, "Export Failed", 
                                    f"Failed to export layer to:\n{output_path}")
                 
         except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
+            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Export Error", 
                                f"Error during export:\n{str(e)}")
             print(f"[ERROR] Export failed: {e}")
@@ -1106,7 +1106,7 @@ def main():
     print("[INFO] Initializing main window (no default file)...")
     window = MainWindow()
     window.show()
-    from PySide6.QtCore import QTimer
+    from PyQt6.QtCore import QTimer
     def show_and_raise():
         window.showMaximized()
         window.raise_()

@@ -1,7 +1,7 @@
 laspy
 numpy
 pyvista
-PySide6
+PyQt6
 pyvistaqt
 matplotlib
 scipy

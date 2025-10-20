@@ -14,9 +14,9 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional, Type, Union
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal, QThread
-from PySide6.QtWidgets import QWidget, QDialog, QDockWidget, QMenu
-from PySide6.QtGui import QIcon, QAction
+from PyQt6.QtCore import QObject, pyqtSignal as Signal, QThread
+from PyQt6.QtWidgets import QWidget, QDialog, QDockWidget, QMenu
+from PyQt6.QtGui import QIcon, QAction
 
 # Import debug control - fall back to regular print if not available
 try:
@@ -177,7 +177,7 @@ class BasePlugin(ABC):
     
     def add_dock_widget(self, name: str, widget: QWidget, area=None, visible: bool = True) -> QDockWidget:
         """Add a dockable widget to the main window, replacing any existing visible dock"""
-        from PySide6.QtCore import Qt
+        from PyQt6.QtCore import Qt
         
         if area is None:
             area = Qt.RightDockWidgetArea
